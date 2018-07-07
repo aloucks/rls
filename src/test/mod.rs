@@ -239,7 +239,7 @@ fn test_hover() {
         results.clone(),
         &[
             ExpectedMessage::new(Some(11))
-                .expect_contains(r#"[{"language":"rust","value":"&str"}]"#),
+                .expect_contains(r#"[{"language":"rust","value":"&str"},{"language":"rust","value":"\nlet world = \"world\";"}]"#),
         ],
     );
 }
