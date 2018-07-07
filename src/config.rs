@@ -144,6 +144,7 @@ pub struct Config {
     pub racer_completion: bool,
     #[serde(deserialize_with = "deserialize_clippy_preference")]
     pub clippy_preference: ClippyPreference,
+    pub full_docs: Inferrable<bool>,
 }
 
 impl Default for Config {
@@ -170,6 +171,7 @@ impl Default for Config {
             all_targets: true,
             racer_completion: true,
             clippy_preference: ClippyPreference::OptIn,
+            full_docs: Inferrable::Inferred(false),
         };
         result.normalise();
         result
