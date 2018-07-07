@@ -269,11 +269,10 @@ impl RequestAction for Hover {
                     }
                     _ => ()
                 };
-                // Fall back to racer if no full_docs are available.
-                // It may be desirable to always check racer for local defs
-                // even when full_docs are enabled so that the variable declaration
-                // is displayed via the racer context string.
-                if !full_docs {
+                // Fall back to racer if full_docs aren't available or if the number of lines is <= 1.
+                // It may be desirable to always check racer for local and field defs even when full_docs
+                // are enabled so that the variable declaration are displayed via the racer context string.
+                if !full_docs || docs.lines().count() <= 1 || append_racer_ty {
                     if let Some((racer_docs, racer_ty)) = hover_racer(&ctx, &span, Some(def)) {
                         trace!("hover: found racer docs: def: Some(def)");
                         if racer_docs.len() > docs.len() {
@@ -516,7 +515,6 @@ impl RequestAction for Completion {
                     if code_completion_has_snippet_support {
                         let snippet = racer::snippet_for_match(&comp, &session);
                         if !snippet.is_empty() {
-                            trace!("c location, {:?}, comp: {:?}, snippet: {:?}", location, comp, snippet);
                             item.insert_text = Some(snippet);
                             item.insert_text_format = Some(InsertTextFormat::Snippet);
                         }
