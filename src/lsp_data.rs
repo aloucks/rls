@@ -237,7 +237,8 @@ pub fn postprocess_docs(docs: &str) -> String {
                 trimmed.contains("rust") || 
                 trimmed.contains("no_run") || 
                 trimmed.contains("ignore") || 
-                trimmed.contains("should_panic");
+                trimmed.contains("should_panic") ||
+                trimmed.contains("compile_fail");
             in_codeblock = !in_codeblock;
             if !in_codeblock {
                 in_rust_codeblock = false;
