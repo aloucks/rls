@@ -21,6 +21,8 @@ use racer;
 use rls_vfs::FileContents;
 use languageserver_types as ls_types;
 
+use crate::actions::hover;
+
 pub use languageserver_types::*;
 pub use languageserver_types::request::Request as LSPRequest;
 pub use languageserver_types::notification::Notification as LSPNotification;
@@ -224,55 +226,53 @@ pub fn completion_kind_from_match_type(m: racer::MatchType) -> CompletionItemKin
     }
 }
 
-/// Cleanup documentation
-pub fn postprocess_docs(docs: &str) -> String {
-    let mut in_codeblock = false;
-    let mut in_rust_codeblock = false;
-    let mut processed_docs = String::with_capacity(docs.len());
-    let mut last_line_ignored = false;
-    for line in docs.lines() {
-        let mut trimmed = line.trim();
-        if trimmed.starts_with("```") {
-            in_rust_codeblock = trimmed == "```" || 
-                trimmed.contains("rust") || 
-                trimmed.contains("no_run") || 
-                trimmed.contains("ignore") || 
-                trimmed.contains("should_panic") ||
-                trimmed.contains("compile_fail");
-            in_codeblock = !in_codeblock;
-            if !in_codeblock {
-                in_rust_codeblock = false;
-            }
-        }
-        let mut line = line.to_string();
-        if in_rust_codeblock && trimmed.starts_with("```") {
-            line = line.replace("no_run", "");
-            line = line.replace("ignore", "");
-            line = line.replace("should_panic", "");
-            line = line.replace(",", "");
-        }
-        
-        // Racer sometimes pulls these out of the std library docs
-        let ignore_slashes = 
-            line.contains("//////////////////////////////////") &&
-            line.ends_with("//////////////////////////////////") &&
-            line.starts_with("//////////////////////////////////");
+// /// Cleanup documentation code blocks
+// pub fn process_docs(docs: &str) -> String {
+//     trace!("process_docs");
+//     let mut in_codeblock = false;
+//     let mut in_rust_codeblock = false;
+//     let mut processed_docs = String::with_capacity(docs.len());
+//     let mut last_line_ignored = false;
+//     for line in docs.lines() {
+//         let mut trimmed = line.trim();
+//         if trimmed.starts_with("```") {
+//             in_rust_codeblock = trimmed == "```" ||
+//                 trimmed.contains("rust") ||
+//                 trimmed.contains("no_run") ||
+//                 trimmed.contains("ignore") ||
+//                 trimmed.contains("should_panic") ||
+//                 trimmed.contains("compile_fail");
+//             in_codeblock = !in_codeblock;
+//             if !in_codeblock {
+//                 in_rust_codeblock = false;
+//             }
+//         }
+//         let mut line = line.to_string();
+//         if in_rust_codeblock && trimmed.starts_with("```") {
+//             line = "```rust".into();
+//         }
 
-        let ignore_whitespace = last_line_ignored && trimmed.is_empty();
-        let ignore_line = ignore_whitespace || (in_rust_codeblock && trimmed.starts_with("#"));
-        let ignore_line = ignore_line || ignore_slashes;
+//         // Racer sometimes pulls these out of the std library docs
+//         let ignore_slashes =
+//             line.contains("//////////////////////////////////") &&
+//             line.ends_with("//////////////////////////////////") &&
+//             line.starts_with("//////////////////////////////////");
 
-        if !ignore_line {
-            processed_docs.push_str(line.trim_right());
-            processed_docs.push_str("\n");
-            last_line_ignored = false;
-        } else {
-            last_line_ignored = true;
-        }
-    }
+//         let ignore_whitespace = last_line_ignored && trimmed.is_empty();
+//         let ignore_line = ignore_whitespace || (in_rust_codeblock && trimmed.starts_with("#"));
+//         let ignore_line = ignore_line || ignore_slashes;
 
-    processed_docs
-}
+//         if !ignore_line {
+//             processed_docs.push_str(line.trim_right());
+//             processed_docs.push_str("\n");
+//             last_line_ignored = false;
+//         } else {
+//             last_line_ignored = true;
+//         }
+//     }
+
+//     processed_docs
+// }
 
 /// Convert a racer match into an RLS completion.
 pub fn completion_item_from_racer_match(m: &racer::Match) -> CompletionItem {
@@ -282,7 +282,7 @@ pub fn completion_item_from_racer_match(m: &racer::Match) -> CompletionItem {
     if !m.docs.is_empty() {
         item.documentation = Some(Documentation::MarkupContent(MarkupContent {
             kind: MarkupKind::Markdown,
-            value: postprocess_docs(&m.docs)
+            value: hover::process_docs(&m.docs)
         }));
     }
 

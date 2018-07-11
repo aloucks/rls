@@ -19,6 +19,7 @@ use rustfmt_nightly::{format_input, FileLines, FileName, Input as FmtInput, Rang
 use serde_json;
 use rls_span as span;
 
+use crate::actions::hover;
 use crate::actions::work_pool;
 use crate::actions::work_pool::WorkDescription;
 use crate::actions::run::collect_run_actions;
@@ -134,6 +135,7 @@ impl RequestAction for Symbols {
     }
 }
 
+<<<<<<< HEAD
 /// Extracts hover docs and the context string information using racer.
 fn hover_racer(ctx: &InitActionContext, span: &span::Span<span::ZeroIndexed>, def: Option<&Def>) -> Option<(String, Option<String>)> {
     trace!("hover_racer: def.name: {:?}", def.map(|def| &def.name));
@@ -193,6 +195,8 @@ fn hover_racer(ctx: &InitActionContext, span: &span::Span<span::ZeroIndexed>, de
     results.unwrap()
 }
 
+=======
+>>>>>>> Refactor hover tooltips
 impl RequestAction for Hover {
     type Response = lsp_data::Hover;
 
@@ -207,36 +211,8 @@ impl RequestAction for Hover {
         ctx: InitActionContext,
         params: Self::Params,
     ) -> Result<Self::Response, ResponseError> {
-        let file_path = parse_file_path!(&params.text_document.uri, "hover")?;
-        let span = ctx.convert_pos_to_span(file_path, params.position);
-        trace!("hover: span: {:?}", span);
 
-        let analysis = &ctx.analysis;
-        let full_docs = ctx.config.lock().map(|cfg| *cfg.full_docs.as_ref()).unwrap_or(false);
-        let mut ty = analysis.show_type(&span).unwrap_or_else(|_| String::new());
-        let mut docs = analysis.docs(&span).unwrap_or_else(|_| String::new());
-        let doc_url = analysis.doc_url(&span).unwrap_or_else(|_| String::new());
-
-        trace!("hover: ty: {:?}", ty);
-        trace!("hover: full_docs: {:?}, docs: {:?}", full_docs, docs);
-
-        // The 'ty' from hover_racer is sometimes the type and other times contextual declaration. In the case of
-        // fields and variables we append the context. In all other cases we replace the `ty` with what comes back
-        // from racer.
-        let mut append_racer_ty = false;
-
-        let update_ty = |ty: &str, more_ty: &str, append: bool| {
-            let mut new_ty = String::with_capacity(ty.len() + more_ty.len() + 2);
-            if append && ty.trim() != more_ty.trim() {
-                new_ty.push_str(&ty);
-                new_ty.push_str("\n");
-                new_ty.push_str(more_ty.as_ref());
-            } else {
-                new_ty = more_ty.into();
-            }
-            new_ty
-        };
-
+<<<<<<< HEAD
         match analysis.id(&span).and_then(|id| analysis.get_def(id)) {
             Ok(ref def) => {
                 trace!("hover: def: {:?}", def);
@@ -352,9 +328,12 @@ impl RequestAction for Hover {
             let newlines = if contents.is_empty() { "" } else { "\n\n" };
             contents.push(MarkedString::from_markdown(format!("{}{}", newlines, processed_docs.trim())));
         }
+=======
+        let tooltip = hover::tooltip(&ctx, &params)?;
+>>>>>>> Refactor hover tooltips
 
         Ok(lsp_data::Hover {
-            contents: HoverContents::Array(contents),
+            contents: HoverContents::Array(tooltip),
             range: None, // TODO: maybe add?
         })
     }
@@ -1014,7 +993,7 @@ impl RequestAction for ResolveCompletion {
     }
 }
 
-fn racer_coord(
+pub fn racer_coord(
     line: span::Row<span::OneIndexed>,
     column: span::Column<span::ZeroIndexed>,
 ) -> racer::Coordinate {
