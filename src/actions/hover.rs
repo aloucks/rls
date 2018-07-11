@@ -308,20 +308,28 @@ fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&De
             })
             .map(|m| {
                 let mut ty = None;
-                if m.mtype != racer::MatchType::Module {
-                    let s = m.contextstr.trim_right_matches("{").trim();
-                    if s.starts_with("pub fn") || 
-                        s.starts_with("fn") || 
-                        s.starts_with("pub(crate) fn") || 
-                        s.starts_with("crate fn")
-                    {
-                        let the_type = format_method(ctx, s.into());
+                trace!("hover_racer: contextstr: {:?}", m.contextstr);
+                let contextstr = m.contextstr.trim_right_matches("{").trim();
+                match m.mtype {
+                    racer::MatchType::Module => {
+                        // Ignore
+                    },
+                    racer::MatchType::Function => {
+                        let the_type = format_method(ctx, contextstr.into());
                         if !the_type.is_empty() {
                             ty = Some(the_type.into())
                         }
-                    }
-                    if ty.is_none() {
-                        ty = Some(s.into());
+                    },
+                    racer::MatchType::Trait | racer::MatchType::Enum | racer::MatchType::Struct => {
+                        let the_type = format_object(ctx, contextstr.into());
+                        if !the_type.is_empty() {
+                            ty = Some(the_type.into())
+                        }
+                    },
+                    _ => {
+                        if !contextstr.trim().is_empty() {
+                            ty = Some(contextstr.into())
+                        }
                     }
                 }
                 trace!("hover_racer: racer_ty: {:?}", ty);
