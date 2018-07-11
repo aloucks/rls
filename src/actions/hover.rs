@@ -1,7 +1,7 @@
 use span::{Span, ZeroIndexed, Row};
 use analysis::{Def, DefKind};
 use actions::InitActionContext;
-use vfs::Vfs;
+use vfs::{self, Vfs};
 use lsp_data::*;
 use racer;
 use actions::requests::racer_coord;
@@ -134,7 +134,7 @@ fn local_variable_usage(ctx: &InitActionContext, def: &Def) -> Vec<MarkedString>
             context.push_str(line.trim());
         },
         Err(e) => {
-            error!("hover_local_variable_declaration: error = {:?}", e);
+            error!("local_variable_usage: error = {:?}", e);
         }
     }
     if context.ends_with("{") {
@@ -169,6 +169,36 @@ fn field_or_variant(ctx: &InitActionContext, def: &Def, doc_url: Option<String>)
     tooltip
 }
 
+/// Extracts a function, method, struct, enum, or trait decleration from source.
+fn extract_decleration(vfs: &Vfs, file: &Path, mut row: Row<ZeroIndexed>) -> Result<Vec<String>, vfs::Error> {
+    debug!("extract_decleration: row_start: {:?}, file: {:?}", row, file);
+    let mut lines = Vec::new();
+    loop {
+        match vfs.load_line(file, row) {
+            Ok(line) => {
+                row = Row::new_zero_indexed(row.0.saturating_add(1));
+                let mut line = line.trim();
+                if let Some(pos) = line.rfind("{") {
+                    line = &line[0..pos];
+                    lines.push(line.into());
+                    break;
+                } else if let Some(pos) = line.rfind(";") {
+                    line = &line[0..pos];
+                    lines.push(line.into());
+                    break;
+                } else {
+                    lines.push(line.into());
+                }
+            },
+            Err(e) => {
+                trace!("extract_decleration error: {:?}", e);
+                return Err(e);
+            }
+        }
+    }
+    Ok(lines)
+}
+
 fn struct_enum_union_trait(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
     // fallback in case source extration fails
     let the_type = || match def.kind {
@@ -180,33 +210,9 @@ fn struct_enum_union_trait(ctx: &InitActionContext, def: &Def, doc_url: Option<S
     };
 
     let the_type = {
-        let mut lines = Vec::new();
-        let mut row = def.span.range.row_start;
-        loop {
-            match ctx.vfs.load_line(&def.span.file, row) {
-                Ok(line) => {
-                    row = Row::new_zero_indexed(row.0.saturating_add(1));
-                    let mut line = line.trim();
-                    if let Some(pos) = line.rfind("{") {
-                        line = &line[0..pos];
-                        lines.push(line.into());
-                        break;
-                    } else if let Some(pos) = line.rfind(";") {
-                        line = &line[0..pos];
-                        lines.push(line.into());
-                        break;
-                    } else {
-                        lines.push(line.into());
-                    }
-                },
-                Err(e) => {
-                    warn!("hover: structure_enum_union_trait: failed to load source: {:?}", e);
-                    lines.clear();
-                    lines.push(the_type());
-                }
-            }
-        }
-        let decl = lines.join(" ");
+        let decl = extract_decleration(&ctx.vfs, &def.span.file, def.span.range.row_start)
+            .map(|lines| lines.join("\n"))
+            .unwrap_or(the_type());
         let mut decl = decl.trim();
         if let (Some(pos), true) = (decl.rfind("("), decl.ends_with(")")) {
              decl = &decl[0..pos];
@@ -248,11 +254,14 @@ fn mod_use(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<M
 }
 
 fn function_method(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
-    let the_type = def.value.trim()
+    let the_type = || def.value.trim()
         .replacen("fn ", &format!("fn {}", def.name), 1)
         .replace("> (", ">(").replace("->(", "-> (");
 
-    let the_type = format_method(ctx, the_type);
+    let decl = extract_decleration(&ctx.vfs, &def.span.file, def.span.range.row_start)
+        .map(|lines| lines.join("\n"));
+    
+    let the_type = format_method(ctx, decl.unwrap_or(the_type()));
     
     let docs = extract_docs(&ctx.vfs, def.span.file.as_ref(), def.span.range.row_start)
         .unwrap_or_else(|| def.docs.trim().into());
@@ -271,12 +280,12 @@ fn function_method(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) 
 
 /// Extracts hover docs and the context string information using racer.
 fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&Def>) -> Option<(String, Option<String>)> {
-    trace!("hover_racer: def.name: {:?}", def.map(|def| &def.name));
+    trace!("racer_docs: def.name: {:?}", def.map(|def| &def.name));
     let vfs = ctx.vfs.clone();
     let file_path = &span.file;
 
     if !file_path.as_path().exists() {
-        trace!("hover_racer: skipping non-existant file: {:?}", file_path);
+        trace!("racer_docs: skipping non-existant file: {:?}", file_path);
         return None;
     }
 
@@ -286,7 +295,7 @@ fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&De
         line.get(col_start..col_end).map(|line| line.to_string())
     });
 
-    trace!("hover_racer: name: {:?}", name);
+    trace!("racer_docs: name: {:?}", name);
     
     let results = ::std::panic::catch_unwind(move || {
         let cache = racer::FileCache::new(vfs);
@@ -294,7 +303,7 @@ fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&De
         let row = span.range.row_end.one_indexed();
         let coord = racer_coord(row, span.range.col_end);
         let location = racer::Location::Coords(coord);
-        trace!("hover_racer: file_path: {:?}, location: {:?}", file_path, location);
+        trace!("racer_docs: file_path: {:?}, location: {:?}", file_path, location);
         let matches = racer::complete_from_file(file_path, location, &session);
         matches
             // Remove any matches that don't match the def or span name.
@@ -308,7 +317,7 @@ fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&De
             })
             .map(|m| {
                 let mut ty = None;
-                trace!("hover_racer: contextstr: {:?}", m.contextstr);
+                trace!("racer_docs: contextstr: {:?}", m.contextstr);
                 let contextstr = m.contextstr.trim_right_matches("{").trim();
                 match m.mtype {
                     racer::MatchType::Module => {
@@ -332,14 +341,14 @@ fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&De
                         }
                     }
                 }
-                trace!("hover_racer: racer_ty: {:?}", ty);
+                trace!("racer_docs: racer_ty: {:?}", ty);
                 (m.docs, ty)
             })
             .next()
     });
 
     let results = results.map_err(|_| {
-        warn!("hover_racer: racer panicked");
+        warn!("racer_docs: racer panicked");
     });
 
     results.unwrap_or(None)
@@ -348,7 +357,7 @@ fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&De
 /// Formats a struct, enum, union, or trait. The original type is returned
 /// in the event of an error.
 fn format_object(ctx: &InitActionContext, the_type: String) -> String {
-    trace!("hover: format_object: {}", the_type);
+    trace!("format_object: {}", the_type);
     let config = ctx.fmt_config().get_rustfmt_config().clone();
     let object = format!("{}{{}}", the_type);
     let mut out = Vec::<u8>::with_capacity(the_type.len());
@@ -362,7 +371,7 @@ fn format_object(ctx: &InitActionContext, the_type: String) -> String {
             }
         },
         Err(e) => {
-            warn!("hover: object format failed: {:?}", e);
+            warn!("format_object: error: {:?}", e);
             the_type
         }
     }
@@ -371,7 +380,7 @@ fn format_object(ctx: &InitActionContext, the_type: String) -> String {
 /// Formats a method or function. The original type is returned
 /// in the event of an error.
 fn format_method(ctx: &InitActionContext, the_type: String) -> String {
-    trace!("hover: format_method: {}", the_type);
+    trace!("format_method: {}", the_type);
     let config = ctx.fmt_config().get_rustfmt_config().clone();
     let method = format!("impl Dummy {{ {} {{ unimplmented!() }} }}", the_type);
     let mut out = Vec::<u8>::with_capacity(the_type.len());
@@ -398,7 +407,7 @@ fn format_method(ctx: &InitActionContext, the_type: String) -> String {
             }
         },
         Err(e) => {
-            warn!("hover: method format failed: {:?}", e);
+            warn!("format_method: error: {:?}", e);
             the_type
         }
     }
@@ -441,44 +450,44 @@ pub fn tooltip(
     
     if let Ok(def) = hover_span_def {
         if def.kind == DefKind::Local && def.span == hover_span && def.qualname.contains("$") {
-            trace!("hover: local variable declaration: {}", def.name);
+            trace!("tooltip: local variable declaration: {}", def.name);
             contents.push(MarkedString::from_language_code("rust".into(), format!("{}", def.value.trim())));
         } else if def.kind == DefKind::Local && def.span != hover_span && !def.qualname.contains("$") {
-            trace!("hover: function argument usage: {}", def.name);
+            trace!("tooltip: function argument usage: {}", def.name);
             contents.push(MarkedString::from_language_code("rust".into(), format!("{}", def.value.trim())));
         } else if def.kind == DefKind::Local && def.span != hover_span && def.qualname.contains("$") {
-            trace!("hover: local variable usage: {}", def.name);
+            trace!("tooltip: local variable usage: {}", def.name);
             contents.extend(local_variable_usage(&ctx, &def));
         } else if def.kind == DefKind::Local && def.span == hover_span {
-            trace!("hover: function signature argument: {}", def.name);
+            trace!("tooltip: function signature argument: {}", def.name);
             contents.push(MarkedString::from_language_code("rust".into(), format!("{}", def.value.trim())));
         } else { match def.kind {
             DefKind::TupleVariant | DefKind::StructVariant | DefKind::Field => {
-                trace!("hover: field or variant: {}", def.name);
+                trace!("tooltip: field or variant: {}", def.name);
                 contents.extend(field_or_variant(&ctx, &def, doc_url));
             },
             DefKind::Enum | DefKind::Union | DefKind::Struct | DefKind::Trait => {
-                trace!("hover: struct, enum, union, or trait: {}", def.name);
+                trace!("tooltip: struct, enum, union, or trait: {}", def.name);
                 contents.extend(struct_enum_union_trait(&ctx, &def, doc_url));
             },
             DefKind::Function | DefKind::Method => {
-                trace!("hover: function or method: {}", def.name);
+                trace!("tooltip: function or method: {}", def.name);
                 contents.extend(function_method(&ctx, &def, doc_url));
             },
             DefKind::Mod => {
-                trace!("hover: mod usage: {}", def.name);
+                trace!("tooltip: mod usage: {}", def.name);
                 contents.extend(mod_use(&ctx, &def, doc_url));
             },
             DefKind::Static | DefKind::Const => {
-                trace!("hover: static or const (using racer): {}", def.name);
+                trace!("tooltip: static or const (using racer): {}", def.name);
                 racer_fallback(&mut contents);
             },
             _ => {
-                trace!("hover: ignoring def = {:?}", def);
+                trace!("tooltip: ignoring def = {:?}", def);
             }
         }}
     } else {
-        trace!("hover: def is empty; falling back to racer");
+        trace!("tooltip: def is empty; falling back to racer");
         racer_fallback(&mut contents);
     }
 
