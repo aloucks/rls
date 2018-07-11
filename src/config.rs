@@ -144,6 +144,12 @@ pub struct Config {
     pub racer_completion: bool,
     #[serde(deserialize_with = "deserialize_clippy_preference")]
     pub clippy_preference: ClippyPreference,
+    /// Instructs cargo to enable full documentation extraction during save-analysis
+    /// while building the crate. This has no effect on the pre-built standard library,
+    /// which is built without full_docs enabled. Hover tooltips currently extract 
+    /// documentation from source due this limitation. The docs provided by the save-analysis
+    /// are used in the event that source extraction fails. This may prove to be more useful 
+    /// in the future.
     pub full_docs: Inferrable<bool>,
 }
 
