@@ -309,7 +309,20 @@ fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&De
             .map(|m| {
                 let mut ty = None;
                 if m.mtype != racer::MatchType::Module {
-                    ty = Some(m.contextstr.trim_right_matches("{").trim().into());
+                    let s = m.contextstr.trim_right_matches("{").trim();
+                    if s.starts_with("pub fn") || 
+                        s.starts_with("fn") || 
+                        s.starts_with("pub(crate) fn") || 
+                        s.starts_with("crate fn")
+                    {
+                        let the_type = format_method(ctx, s.into());
+                        if !the_type.is_empty() {
+                            ty = Some(the_type.into())
+                        }
+                    }
+                    if ty.is_none() {
+                        ty = Some(s.into());
+                    }
                 }
                 trace!("hover_racer: racer_ty: {:?}", ty);
                 (m.docs, ty)
