@@ -379,13 +379,19 @@ fn format_method(ctx: &InitActionContext, the_type: String) -> String {
         Ok(_) => {
             if let Ok(mut lines) = String::from_utf8(out) {
                 if let Some(front_pos) = lines.find("{") {
-                    lines = lines[1+front_pos..].into();
+                    lines = lines[front_pos..].chars().skip(1).collect();
                 }
                 if let Some(back_pos) = lines.rfind("{") {
                     lines = lines[0..back_pos].into();
                 }
                 lines.lines().filter(|line| line.trim() != "").map(|line| {
-                    format!("{}\n", &line[config.tab_spaces()..])
+                    let mut spaces = config.tab_spaces() + 1;
+                    let should_trim = |c: char| {
+                        spaces = spaces.saturating_sub(1);
+                        spaces > 0 && c.is_whitespace()
+                    };
+                    let line = line.trim_left_matches(should_trim);
+                    format!("{}\n", line)
                 }).collect()
             } else {
                 the_type
