@@ -6,16 +6,19 @@ use lsp_data::*;
 use racer;
 use actions::requests::racer_coord;
 use server::ResponseError;
-use rustfmt::{format_input, Input as FmtInput};
+use rustfmt::{self, Input as FmtInput};
+use config::FmtConfig;
 
 use std::path::Path;
+use std::sync::Arc;
 
-/// Cleanup documentation code blocks
+/// Cleanup documentation code blocks. The `docs` are expected to have the preceeding `///` or `//!`
+/// prefixes already trimmed.
 pub fn process_docs(docs: &str) -> String {
     trace!("process_docs");
     let mut in_codeblock = false;
     let mut in_rust_codeblock = false;
-    let mut processed_docs = String::with_capacity(docs.len());
+    let mut processed_docs = Vec::new();
     let mut last_line_ignored = false;
     for line in docs.lines() {
         let mut trimmed = line.trim();
@@ -39,21 +42,21 @@ pub fn process_docs(docs: &str) -> String {
         // Racer sometimes pulls out comment block headers from the standard library
         let ignore_slashes = line.starts_with("////");
 
-        let is_attribute = trimmed.starts_with("#[");
+        let is_attribute = trimmed.starts_with("#[") && in_rust_codeblock;
+        let is_hidden = trimmed.starts_with("#") && in_rust_codeblock && !is_attribute;
+
         let ignore_whitespace = last_line_ignored && trimmed.is_empty();
-        let ignore_line = ignore_whitespace || (in_rust_codeblock && trimmed.starts_with("#") && !is_attribute);
-        let ignore_line = ignore_line || ignore_slashes;
+        let ignore_line = ignore_slashes || ignore_whitespace || is_hidden;
 
         if !ignore_line {
-            processed_docs.push_str(line.trim_right());
-            processed_docs.push_str("\n");
+            processed_docs.push(line);
             last_line_ignored = false;
         } else {
             last_line_ignored = true;
         }
     }
 
-    processed_docs
+    processed_docs.join("\n")
 }
 
 /// Extracts documentation from the `file` at the specified `row_start`. If the row is
@@ -126,10 +129,10 @@ pub fn extract_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndexed>) -> Opti
     }
 }
 
-fn local_variable_usage(ctx: &InitActionContext, def: &Def) -> Vec<MarkedString> {
+fn tooltip_local_variable_usage(vfs: &Vfs, def: &Def) -> Vec<MarkedString> {
     let the_type = def.value.trim();
     let mut context = String::new();
-    match ctx.vfs.load_line(&def.span.file, def.span.range.row_start) {
+    match vfs.load_line(&def.span.file, def.span.range.row_start) {
         Ok(line) => {
             context.push_str(line.trim());
         },
@@ -142,25 +145,23 @@ fn local_variable_usage(ctx: &InitActionContext, def: &Def) -> Vec<MarkedString>
     }
 
     let mut tooltip = vec![];
-    if context.is_empty() {
-        tooltip.push(MarkedString::from_language_code("rust".into(), format!("{}", the_type)));
-    } else {
-        tooltip.push(MarkedString::from_language_code("rust".into(), format!("{}\n\n", the_type)));
-        tooltip.push(MarkedString::from_language_code("rust".into(), format!("{}", context)));
+    tooltip.push(MarkedString::from_language_code("rust".into(), the_type.into()));
+    if !context.is_empty() {
+        tooltip.push(MarkedString::from_language_code("rust".into(), context));
     }
 
     tooltip
 }
 
-fn field_or_variant(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_field_or_variant(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
     let the_type = def.value.trim();
-    let docs = extract_docs(&ctx.vfs, def.span.file.as_ref(), def.span.range.row_start)
+    let docs = extract_docs(&vfs, def.span.file.as_ref(), def.span.range.row_start)
         .unwrap_or_else(|| def.docs.trim().into());
-    
+
     let mut tooltip = vec![];
-    tooltip.push(MarkedString::from_language_code("rust".into(), format!("{}", the_type)));
+    tooltip.push(MarkedString::from_language_code("rust".into(), the_type.into()));
     if let Some(doc_url) = doc_url {
-        tooltip.push(MarkedString::from_markdown(doc_url + "\n\n"));
+        tooltip.push(MarkedString::from_markdown(doc_url));
     }
     if !docs.is_empty() {
         tooltip.push(MarkedString::from_markdown(docs));
@@ -199,7 +200,7 @@ fn extract_decleration(vfs: &Vfs, file: &Path, mut row: Row<ZeroIndexed>) -> Res
     Ok(lines)
 }
 
-fn struct_enum_union_trait(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_struct_enum_union_trait(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
     // fallback in case source extration fails
     let the_type = || match def.kind {
         DefKind::Struct => format!("struct {}", def.name),
@@ -210,23 +211,19 @@ fn struct_enum_union_trait(ctx: &InitActionContext, def: &Def, doc_url: Option<S
     };
 
     let the_type = {
-        let decl = extract_decleration(&ctx.vfs, &def.span.file, def.span.range.row_start)
+        let decl = extract_decleration(vfs, &def.span.file, def.span.range.row_start)
             .map(|lines| lines.join("\n"))
             .unwrap_or(the_type());
-        let mut decl = decl.trim();
-        if let (Some(pos), true) = (decl.rfind("("), decl.ends_with(")")) {
-             decl = &decl[0..pos];
-        }
-        format_object(ctx, decl.to_string())
+        format_object(fmt_config, decl.to_string())
     };
     
-    let docs = extract_docs(&ctx.vfs, def.span.file.as_ref(), def.span.range.row_start)
+    let docs = extract_docs(vfs, def.span.file.as_ref(), def.span.range.row_start)
         .unwrap_or_else(|| def.docs.trim().into());
     
     let mut tooltip = vec![];
-    tooltip.push(MarkedString::from_language_code("rust".into(), format!("{}", the_type)));
+    tooltip.push(MarkedString::from_language_code("rust".into(), the_type));
     if let Some(doc_url) = doc_url {
-        tooltip.push(MarkedString::from_markdown(doc_url + "\n\n"));
+        tooltip.push(MarkedString::from_markdown(doc_url));
     }
     if !docs.is_empty() {
         tooltip.push(MarkedString::from_markdown(docs));
@@ -235,16 +232,16 @@ fn struct_enum_union_trait(ctx: &InitActionContext, def: &Def, doc_url: Option<S
     tooltip
 }
 
-fn mod_use(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_mod(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
     let the_type = def.value.trim();
     
-    let docs = extract_docs(&ctx.vfs, def.span.file.as_ref(), def.span.range.row_start)
+    let docs = extract_docs(vfs, def.span.file.as_ref(), def.span.range.row_start)
         .unwrap_or_else(|| def.docs.trim().into());
     
     let mut tooltip = vec![];
-    tooltip.push(MarkedString::from_language_code("rust".into(), format!("{}", the_type)));
+    tooltip.push(MarkedString::from_language_code("rust".into(), the_type.into()));
     if let Some(doc_url) = doc_url {
-        tooltip.push(MarkedString::from_markdown(doc_url + "\n\n"));
+        tooltip.push(MarkedString::from_markdown(doc_url));
     }
     if !docs.is_empty() {
         tooltip.push(MarkedString::from_markdown(docs));
@@ -253,23 +250,23 @@ fn mod_use(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<M
     tooltip
 }
 
-fn function_method(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_function_method(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
     let the_type = || def.value.trim()
         .replacen("fn ", &format!("fn {}", def.name), 1)
         .replace("> (", ">(").replace("->(", "-> (");
 
-    let decl = extract_decleration(&ctx.vfs, &def.span.file, def.span.range.row_start)
+    let decl = extract_decleration(vfs, &def.span.file, def.span.range.row_start)
         .map(|lines| lines.join("\n"));
     
-    let the_type = format_method(ctx, decl.unwrap_or(the_type()));
+    let the_type = format_method(fmt_config, decl.unwrap_or(the_type()));
     
-    let docs = extract_docs(&ctx.vfs, def.span.file.as_ref(), def.span.range.row_start)
+    let docs = extract_docs(&vfs, def.span.file.as_ref(), def.span.range.row_start)
         .unwrap_or_else(|| def.docs.trim().into());
     
     let mut tooltip = vec![];
-    tooltip.push(MarkedString::from_language_code("rust".into(), format!("{}", the_type)));
+    tooltip.push(MarkedString::from_language_code("rust".into(), the_type));
     if let Some(doc_url) = doc_url {
-        tooltip.push(MarkedString::from_markdown(doc_url + "\n\n"));
+        tooltip.push(MarkedString::from_markdown(doc_url));
     }
     if !docs.is_empty() {
         tooltip.push(MarkedString::from_markdown(docs));
@@ -278,14 +275,14 @@ fn function_method(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) 
     tooltip
 }
 
-/// Extracts hover docs and the context string information using racer.
-fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&Def>) -> Option<(String, Option<String>)> {
-    trace!("racer_docs: def.name: {:?}", def.map(|def| &def.name));
-    let vfs = ctx.vfs.clone();
+/// Extracts documentation and the context string information using racer.
+fn racer(vfs: Arc<Vfs>, fmt_config: FmtConfig, span: &Span<ZeroIndexed>, def: Option<&Def>) -> Option<(String, Option<String>)> {
+    trace!("racer: def.name: {:?}", def.map(|def| &def.name));
+
     let file_path = &span.file;
 
     if !file_path.as_path().exists() {
-        trace!("racer_docs: skipping non-existant file: {:?}", file_path);
+        trace!("racer: skipping non-existant file: {:?}", file_path);
         return None;
     }
 
@@ -295,7 +292,7 @@ fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&De
         line.get(col_start..col_end).map(|line| line.to_string())
     });
 
-    trace!("racer_docs: name: {:?}", name);
+    trace!("racer: name: {:?}", name);
     
     let results = ::std::panic::catch_unwind(move || {
         let cache = racer::FileCache::new(vfs);
@@ -303,7 +300,7 @@ fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&De
         let row = span.range.row_end.one_indexed();
         let coord = racer_coord(row, span.range.col_end);
         let location = racer::Location::Coords(coord);
-        trace!("racer_docs: file_path: {:?}, location: {:?}", file_path, location);
+        trace!("racer: file_path: {:?}, location: {:?}", file_path, location);
         let matches = racer::complete_from_file(file_path, location, &session);
         matches
             // Remove any matches that don't match the def or span name.
@@ -317,20 +314,20 @@ fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&De
             })
             .map(|m| {
                 let mut ty = None;
-                trace!("racer_docs: contextstr: {:?}", m.contextstr);
+                trace!("racer: contextstr: {:?}", m.contextstr);
                 let contextstr = m.contextstr.trim_right_matches("{").trim();
                 match m.mtype {
                     racer::MatchType::Module => {
                         // Ignore
                     },
                     racer::MatchType::Function => {
-                        let the_type = format_method(ctx, contextstr.into());
+                        let the_type = format_method(&fmt_config, contextstr.into());
                         if !the_type.is_empty() {
                             ty = Some(the_type.into())
                         }
                     },
                     racer::MatchType::Trait | racer::MatchType::Enum | racer::MatchType::Struct => {
-                        let the_type = format_object(ctx, contextstr.into());
+                        let the_type = format_object(&fmt_config, contextstr.into());
                         if !the_type.is_empty() {
                             ty = Some(the_type.into())
                         }
@@ -341,14 +338,14 @@ fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&De
                         }
                     }
                 }
-                trace!("racer_docs: racer_ty: {:?}", ty);
+                trace!("racer: racer_ty: {:?}", ty);
                 (m.docs, ty)
             })
             .next()
     });
 
     let results = results.map_err(|_| {
-        warn!("racer_docs: racer panicked");
+        warn!("racer: racer panicked");
     });
 
     results.unwrap_or(None)
@@ -356,35 +353,80 @@ fn racer_docs(ctx: &InitActionContext, span: &Span<ZeroIndexed>, def: Option<&De
 
 /// Formats a struct, enum, union, or trait. The original type is returned
 /// in the event of an error.
-fn format_object(ctx: &InitActionContext, the_type: String) -> String {
-    trace!("format_object: {}", the_type);
-    let config = ctx.fmt_config().get_rustfmt_config().clone();
-    let object = format!("{}{{}}", the_type);
+fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
+    debug!("format_object: {}", the_type);
+    let config = fmt_config.get_rustfmt_config();
+    let trimmed = the_type.trim();
+    
+    // Normalize the ending for rustfmt
+    let object = if trimmed.ends_with(")") {
+        format!("{};", trimmed)
+    } else if trimmed.ends_with("}") {
+        trimmed.to_string()
+    } else if trimmed.ends_with(";") {
+        trimmed.to_string()
+    } else if trimmed.ends_with("{") {
+        let trimmed = trimmed.trim_right_matches("{").to_string();
+        format!("{}{{}}", trimmed)
+    } else {
+        format!("{}{{}}", trimmed)
+    };
+
     let mut out = Vec::<u8>::with_capacity(the_type.len());
-    match format_input(FmtInput::Text(object), &config, Some(&mut out)) {
+    let formatted = match rustfmt::format_input(FmtInput::Text(object), &config, Some(&mut out)) {
         Ok(_) => {
             let utf8 = String::from_utf8(out);
-            if let Ok((Some(pos), lines)) = utf8.map(|lines| (lines.rfind("{"), lines)) {
-                lines[0..pos].into()
-            } else {
-                the_type
+            match utf8.map(|lines| (lines.rfind("{"), lines)) {
+                Ok((Some(pos), lines)) => {
+                    lines[0..pos].into()
+                },
+                Ok((None, lines)) => {
+                    lines.into()
+                },
+                _ => trimmed.into(),
             }
         },
         Err(e) => {
             warn!("format_object: error: {:?}", e);
-            the_type
+            trimmed.to_string()
         }
-    }
+    };
+
+    // If it's a tuple, remove the trailing ';' and hide non-pub components for pub types
+    let result = if formatted.trim().ends_with(";") {
+        let mut decl = formatted.trim().trim_right_matches(";");
+        if let (Some(pos), true) = (decl.rfind("("), decl.ends_with(")")) {
+            let tuple_parts = decl[pos+1..decl.len()-1].split(",").map(|part| {
+                debug!("format_object: part: {}", part);
+                let part = part.trim();
+                if decl.starts_with("pub") && !part.starts_with("pub") {
+                    "_".to_string()
+                } else {
+                    part.to_string()
+                }
+            }).collect::<Vec<String>>().join(", ");
+            debug!("format_object: tuple_parts: {}", tuple_parts);
+            decl = &decl[0..pos];
+            format!("{}({})", decl, tuple_parts)
+        } else {
+            decl.into()
+        }
+    } else {
+        formatted
+    };
+
+    result.trim().into()
 }
 
 /// Formats a method or function. The original type is returned
 /// in the event of an error.
-fn format_method(ctx: &InitActionContext, the_type: String) -> String {
+fn format_method(fmt_config: &FmtConfig, the_type: String) -> String {
     trace!("format_method: {}", the_type);
-    let config = ctx.fmt_config().get_rustfmt_config().clone();
+    let the_type = the_type.trim().trim_right_matches(";").to_string();
+    let config = fmt_config.get_rustfmt_config();
     let method = format!("impl Dummy {{ {} {{ unimplmented!() }} }}", the_type);
     let mut out = Vec::<u8>::with_capacity(the_type.len());
-    match format_input(FmtInput::Text(method), &config, Some(&mut out)) {
+    let result = match rustfmt::format_input(FmtInput::Text(method), config, Some(&mut out)) {
         Ok(_) => {
             if let Ok(mut lines) = String::from_utf8(out) {
                 if let Some(front_pos) = lines.find("{") {
@@ -410,9 +452,14 @@ fn format_method(ctx: &InitActionContext, the_type: String) -> String {
             warn!("format_method: error: {:?}", e);
             the_type
         }
-    }
+    };
+
+    result.trim().into()
 }
 
+/// Builds a hover tooltip composed of the function signature or type decleration, doc URL
+/// (if available in the save-analysis), source extracted documentation, and code context 
+/// for local variables.
 pub fn tooltip(
     ctx: &InitActionContext,
     params: &TextDocumentPositionParams
@@ -425,25 +472,28 @@ pub fn tooltip(
     let hover_span_def = analysis.id(&hover_span).and_then(|id| analysis.get_def(id));
     let hover_span_docs = analysis.docs(&hover_span).unwrap_or_else(|_| String::new());
 
-    trace!("hover: span: {:?}", hover_span);
-    trace!("hover: span_def: {:?}", hover_span_def);
-    trace!("hover: span_ty: {:?}", hover_span_ty);
+    trace!("tooltip: span: {:?}", hover_span);
+    trace!("tooltip: span_def: {:?}", hover_span_def);
+    trace!("tooltip: span_ty: {:?}", hover_span_ty);
 
     let doc_url = analysis.doc_url(&hover_span).ok();
     
     let mut contents = vec![];
 
+    let vfs = ctx.vfs.clone();
+    let fmt_config = ctx.fmt_config();
+
     let racer_fallback = |contents: &mut Vec<MarkedString>| {
-        if let Some((racer_docs, racer_ty)) = racer_docs(&ctx, &hover_span, None) {
+        if let Some((racer_docs, racer_ty)) = racer(vfs.clone(), ctx.fmt_config(), &hover_span, None) {
             let docs = process_docs(&racer_docs);
             let docs = if docs.trim().is_empty() { hover_span_docs } else { docs };
             let ty = racer_ty.unwrap_or(hover_span_ty);
             let ty = ty.trim();
             if !ty.is_empty() {
-                contents.push(MarkedString::from_language_code("rust".into(), format!("{}", ty)));
+                contents.push(MarkedString::from_language_code("rust".into(), ty.into()));
             }
             if !docs.is_empty() {
-                contents.push(MarkedString::from_markdown(format!("{}", docs)));
+                contents.push(MarkedString::from_markdown(docs.into()));
             }
         }
     };
@@ -451,32 +501,32 @@ pub fn tooltip(
     if let Ok(def) = hover_span_def {
         if def.kind == DefKind::Local && def.span == hover_span && def.qualname.contains("$") {
             trace!("tooltip: local variable declaration: {}", def.name);
-            contents.push(MarkedString::from_language_code("rust".into(), format!("{}", def.value.trim())));
+            contents.push(MarkedString::from_language_code("rust".into(), def.value.trim().into()));
         } else if def.kind == DefKind::Local && def.span != hover_span && !def.qualname.contains("$") {
             trace!("tooltip: function argument usage: {}", def.name);
-            contents.push(MarkedString::from_language_code("rust".into(), format!("{}", def.value.trim())));
+            contents.push(MarkedString::from_language_code("rust".into(), def.value.trim().into()));
         } else if def.kind == DefKind::Local && def.span != hover_span && def.qualname.contains("$") {
             trace!("tooltip: local variable usage: {}", def.name);
-            contents.extend(local_variable_usage(&ctx, &def));
+            contents.extend(tooltip_local_variable_usage(&vfs, &def));
         } else if def.kind == DefKind::Local && def.span == hover_span {
             trace!("tooltip: function signature argument: {}", def.name);
-            contents.push(MarkedString::from_language_code("rust".into(), format!("{}", def.value.trim())));
+            contents.push(MarkedString::from_language_code("rust".into(), def.value.trim().into()));
         } else { match def.kind {
             DefKind::TupleVariant | DefKind::StructVariant | DefKind::Field => {
                 trace!("tooltip: field or variant: {}", def.name);
-                contents.extend(field_or_variant(&ctx, &def, doc_url));
+                contents.extend(tooltip_field_or_variant(&vfs, &def, doc_url));
             },
             DefKind::Enum | DefKind::Union | DefKind::Struct | DefKind::Trait => {
                 trace!("tooltip: struct, enum, union, or trait: {}", def.name);
-                contents.extend(struct_enum_union_trait(&ctx, &def, doc_url));
+                contents.extend(tooltip_struct_enum_union_trait(&vfs, &fmt_config, &def, doc_url));
             },
             DefKind::Function | DefKind::Method => {
                 trace!("tooltip: function or method: {}", def.name);
-                contents.extend(function_method(&ctx, &def, doc_url));
+                contents.extend(tooltip_function_method(&vfs, &fmt_config, &def, doc_url));
             },
             DefKind::Mod => {
                 trace!("tooltip: mod usage: {}", def.name);
-                contents.extend(mod_use(&ctx, &def, doc_url));
+                contents.extend(tooltip_mod(&vfs, &def, doc_url));
             },
             DefKind::Static | DefKind::Const => {
                 trace!("tooltip: static or const (using racer): {}", def.name);
@@ -492,4 +542,248 @@ pub fn tooltip(
     }
 
     Ok(contents)
+}
+
+#[test]
+fn test_process_docs_rust_blocks() {
+    let docs = "
+Brief one liner.
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Phasellus vitae ex
+vel mi egestas semper in non dolor. Proin ut arcu at odio hendrerit consequat.
+
+# Examples
+
+Donec ullamcorper risus quis massa sollicitudin, id faucibus nibh bibendum.
+
+## Hidden code lines and proceeding whitespace is removed and meta attributes are preserved
+
+```
+# extern crate foo;
+
+use foo::bar;
+
+#[derive(Debug)]
+struct Baz(u32);
+
+let baz = Baz(1);
+```
+
+## Rust code block attributes are converted to 'rust'
+
+```compile_fail,E0123
+let foo = ;
+```
+
+## Inner comments and indentation is preserved
+
+```
+/// inner doc comment
+fn foobar() {
+    // inner comment
+    let indent = 1;
+}
+```
+    ".trim();
+
+    let expected = "
+Brief one liner.
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Phasellus vitae ex
+vel mi egestas semper in non dolor. Proin ut arcu at odio hendrerit consequat.
+
+# Examples
+
+Donec ullamcorper risus quis massa sollicitudin, id faucibus nibh bibendum.
+
+## Hidden code lines and proceeding whitespace is removed and meta attributes are preserved
+
+```rust
+use foo::bar;
+
+#[derive(Debug)]
+struct Baz(u32);
+
+let baz = Baz(1);
+```
+
+## Rust code block attributes are converted to 'rust'
+
+```rust
+let foo = ;
+```
+
+## Inner comments and indentation is preserved
+
+```rust
+/// inner doc comment
+fn foobar() {
+    // inner comment
+    let indent = 1;
+}
+```
+    ".trim();
+
+    let actual = process_docs(docs);
+    assert_eq!(expected, actual);
+}
+
+#[test]
+fn test_process_docs_bash_block() {
+    let expected = "
+Brief one liner.
+
+```bash
+# non rust-block comment lines are preserved
+ls -la
+```
+    ".trim();
+
+    let actual = process_docs(expected);
+    assert_eq!(expected, actual);
+}
+
+#[test]
+fn test_process_docs_racer_noise() {
+    let docs = "
+////////////////////////////////////////////////////////////////////////////////
+
+Spawns a new thread, returning a [`JoinHandle`] for it.
+
+The join handle will implicitly *detach* the child thread upon being
+dropped. In this case, the child thread may outlive the parent (unless
+   ".trim();
+
+    let expected = "
+Spawns a new thread, returning a [`JoinHandle`] for it.
+
+The join handle will implicitly *detach* the child thread upon being
+dropped. In this case, the child thread may outlive the parent (unless
+    ".trim();
+
+    let actual = process_docs(docs);
+    assert_eq!(expected, actual);
+}
+
+#[test]
+fn test_format_object() {
+
+    let config = &FmtConfig::default();
+
+    let input = "pub struct Box<T: ?Sized>(Unique<T>);";
+    let result = format_object(config, input.into());
+    assert_eq!("pub struct Box<T: ?Sized>(_)", &result);
+
+    let input = "pub struct Thing(pub u32);";
+    let result = format_object(config, input.into());
+    assert_eq!("pub struct Thing(pub u32)", &result, "tuple struct with trailing ';' from racer");
+
+    let input = "pub struct Thing(pub u32)";
+    let result = format_object(config, input.into());
+    assert_eq!("pub struct Thing(pub u32)", &result, "pub tuple struct");
+
+    let input = "pub struct Thing(pub u32, i32)";
+    let result = format_object(config, input.into());
+    assert_eq!("pub struct Thing(pub u32, _)", &result, "non-pub components of pub tuples should be hidden");
+
+    let input = "struct Thing(u32, i32)";
+    let result = format_object(config, input.into());
+    assert_eq!("struct Thing(u32, i32)", &result, "private tuple struct may show private components");
+
+    let input = "pub struct Thing<T: Copy>";
+    let result = format_object(config, input.into());
+    assert_eq!("pub struct Thing<T: Copy>", &result, "pub struct");
+
+    let input = "pub struct Thing<T: Copy> {";
+    let result = format_object(config, input.into());
+    assert_eq!("pub struct Thing<T: Copy>", &result, "pub struct with trailing '{{' from racer");
+
+    let input = "pub struct Thing { x: i32 }";
+    let result = format_object(config, input.into());
+    assert_eq!("pub struct Thing", &result, "pub struct with body");
+
+    let input = "pub enum Foobar { Foo, Bar }";
+    let result = format_object(config, input.into());
+    assert_eq!("pub enum Foobar", &result, "pub enum with body");
+
+    let input = "pub trait Thing<T, U> where T: Copy + Sized, U: Clone";
+    let expected = "
+pub trait Thing<T, U>
+where
+    T: Copy + Sized,
+    U: Clone,
+    ".trim();
+    let result = format_object(config, input.into());
+    assert_eq!(expected, &result, "trait with where clause");
+}
+
+
+#[test]
+fn test_format_method() {
+
+    let config = &FmtConfig::default();
+
+    let input = "fn foo() -> ()";
+    let result = format_method(config, input.into());
+    assert_eq!(input, &result, "function explicit void return");
+
+    let input = "fn foo()";
+    let expected = "fn foo()";
+    let result = format_method(config, input.into());
+    assert_eq!(expected, &result, "function");
+
+    let input = "fn foo() -> Thing";
+    let expected = "fn foo() -> Thing";
+    let result = format_method(config, input.into());
+    assert_eq!(expected, &result, "function with return");
+
+    let input = "fn foo(&self);";
+    let expected = "fn foo(&self)";
+    let result = format_method(config, input.into());
+    assert_eq!(expected, &result, "method");
+
+    let input = "fn foo<T>(t: T) where T: Copy";
+    let expected = "
+fn foo<T>(t: T)
+where
+    T: Copy,
+    ".trim();
+    let result = format_method(config, input.into());
+    assert_eq!(expected, &result, "function with generic parameters");
+
+    let input = "fn foo<T>(&self, t: T) where T: Copy";
+    let expected = "
+fn foo<T>(&self, t: T)
+where
+    T: Copy,
+    ".trim();
+    let result = format_method(config, input.into());
+    assert_eq!(expected, &result, "method with type parameters");
+
+    let input = "fn really_really_really_really_long_name<T>(foo_thing: String, bar_thing: Thing, baz_thing: Vec<T>, foo_other: u32, bar_other: i32) -> Thing";
+    let expected = "
+fn really_really_really_really_long_name<T>(
+    foo_thing: String,
+    bar_thing: Thing,
+    baz_thing: Vec<T>,
+    foo_other: u32,
+    bar_other: i32,
+) -> Thing
+    ".trim();
+    let result = format_method(config, input.into());
+    assert_eq!(expected, &result, "long function signature");
+
+    let input = "fn really_really_really_really_long_name(&self, foo_thing: String, bar_thing: Thing, baz_thing: Vec<T>, foo_other: u32, bar_other: i32) -> Thing";
+    let expected = "
+fn really_really_really_really_long_name(
+    &self,
+    foo_thing: String,
+    bar_thing: Thing,
+    baz_thing: Vec<T>,
+    foo_other: u32,
+    bar_other: i32,
+) -> Thing
+    ".trim();
+    let result = format_method(config, input.into());
+    assert_eq!(expected, &result, "long method signature with unspecified generic");
 }

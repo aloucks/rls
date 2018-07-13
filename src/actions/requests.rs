@@ -993,7 +993,7 @@ impl RequestAction for ResolveCompletion {
     }
 }
 
-pub fn racer_coord(
+pub(crate) fn racer_coord(
     line: span::Row<span::OneIndexed>,
     column: span::Column<span::ZeroIndexed>,
 ) -> racer::Coordinate {
