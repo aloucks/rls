@@ -131,6 +131,11 @@ and the following unstable options:
 * `cfg_test` (`bool`, defaults to `false`) checks the project as if you were
   running `cargo test` rather than `cargo build`. I.e., compiles (but does not
   run) test code.
+* `full_docs` (`bool`, defaults to `false`) instructs rustc to populate the
+  save-analysis data with full source documentation. When set to `false`, only the
+  first paragraph is recorded. This option _currently_ has little to no effect on
+  hover tooltips. The save-analysis docs are only used if source extraction fails.
+  This option has no effect on the standard library.
 
 
 ## Troubleshooting
