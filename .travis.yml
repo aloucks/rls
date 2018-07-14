@@ -21,6 +21,7 @@ matrix:
 install:
     # Required for Racer autoconfiguration
     rustup component add rust-src
+    rustup component add rust-analysis
 script: |
   #!/bin/bash
   if [ -v USE_FEATURES ]; then
