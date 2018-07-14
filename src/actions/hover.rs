@@ -64,7 +64,7 @@ pub fn process_docs(docs: &str) -> String {
 /// the scan will ignore the specified row and move _upward_.
 /// 
 /// The documentation is run through a post-process to cleanup code blocks.
-pub fn extract_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndexed>) -> Option<String> {
+pub fn extract_and_process_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndexed>) -> Option<String> {
     let preceeding = if row_start.0 == 0 { false } else { true };
     let direction = if preceeding { "up" } else { "down" };
     debug!("extract_docs: row_start = {:?}, direction = {:?}, file = {:?}", row_start, direction, file);
@@ -135,47 +135,6 @@ pub fn extract_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndexed>) -> Opti
     }
 }
 
-fn tooltip_local_variable_usage(vfs: &Vfs, def: &Def) -> Vec<MarkedString> {
-    let the_type = def.value.trim();
-    let mut context = String::new();
-    match vfs.load_line(&def.span.file, def.span.range.row_start) {
-        Ok(line) => {
-            context.push_str(line.trim());
-        },
-        Err(e) => {
-            error!("local_variable_usage: error = {:?}", e);
-        }
-    }
-    if context.ends_with("{") {
-        context.push_str(" ... }");
-    }
-
-    let mut tooltip = vec![];
-    tooltip.push(MarkedString::from_language_code("rust".into(), the_type.into()));
-    if !context.is_empty() {
-        tooltip.push(MarkedString::from_language_code("rust".into(), context));
-    }
-
-    tooltip
-}
-
-fn tooltip_field_or_variant(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
-    let the_type = def.value.trim();
-    let docs = extract_docs(&vfs, def.span.file.as_ref(), def.span.range.row_start)
-        .unwrap_or_else(|| def.docs.trim().into());
-
-    let mut tooltip = vec![];
-    tooltip.push(MarkedString::from_language_code("rust".into(), the_type.into()));
-    if let Some(doc_url) = doc_url {
-        tooltip.push(MarkedString::from_markdown(doc_url));
-    }
-    if !docs.is_empty() {
-        tooltip.push(MarkedString::from_markdown(docs));
-    }
-
-    tooltip
-}
-
 /// Extracts a function, method, struct, enum, or trait decleration from source.
 fn extract_decleration(vfs: &Vfs, file: &Path, mut row: Row<ZeroIndexed>) -> Result<Vec<String>, vfs::Error> {
     debug!("extract_decleration: row_start: {:?}, file: {:?}", row, file);
@@ -206,6 +165,47 @@ fn extract_decleration(vfs: &Vfs, file: &Path, mut row: Row<ZeroIndexed>) -> Res
     Ok(lines)
 }
 
+fn tooltip_local_variable_usage(vfs: &Vfs, def: &Def) -> Vec<MarkedString> {
+    let the_type = def.value.trim();
+    let mut context = String::new();
+    match vfs.load_line(&def.span.file, def.span.range.row_start) {
+        Ok(line) => {
+            context.push_str(line.trim());
+        },
+        Err(e) => {
+            error!("local_variable_usage: error = {:?}", e);
+        }
+    }
+    if context.ends_with("{") {
+        context.push_str(" ... }");
+    }
+
+    let mut tooltip = vec![];
+    tooltip.push(MarkedString::from_language_code("rust".into(), the_type.into()));
+    if !context.is_empty() {
+        tooltip.push(MarkedString::from_language_code("rust".into(), context));
+    }
+
+    tooltip
+}
+
+fn tooltip_field_or_variant(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+    let the_type = def.value.trim();
+    let docs = extract_and_process_docs(&vfs, def.span.file.as_ref(), def.span.range.row_start)
+        .unwrap_or_else(|| def.docs.trim().into());
+
+    let mut tooltip = vec![];
+    tooltip.push(MarkedString::from_language_code("rust".into(), the_type.into()));
+    if let Some(doc_url) = doc_url {
+        tooltip.push(MarkedString::from_markdown(doc_url));
+    }
+    if !docs.is_empty() {
+        tooltip.push(MarkedString::from_markdown(docs));
+    }
+
+    tooltip
+}
+
 fn tooltip_struct_enum_union_trait(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
     // fallback in case source extration fails
     let the_type = || match def.kind {
@@ -223,7 +223,7 @@ fn tooltip_struct_enum_union_trait(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def,
         format_object(fmt_config, decl.to_string())
     };
     
-    let docs = extract_docs(vfs, def.span.file.as_ref(), def.span.range.row_start)
+    let docs = extract_and_process_docs(vfs, def.span.file.as_ref(), def.span.range.row_start)
         .unwrap_or_else(|| def.docs.trim().into());
     
     let mut tooltip = vec![];
@@ -243,7 +243,7 @@ fn tooltip_mod(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedStrin
     let the_type = the_type.replace("\\\\", "/");
     let the_type = the_type.replace("\\", "/");
 
-    let docs = extract_docs(vfs, def.span.file.as_ref(), def.span.range.row_start)
+    let docs = extract_and_process_docs(vfs, def.span.file.as_ref(), def.span.range.row_start)
         .unwrap_or_else(|| def.docs.trim().into());
     
     let mut tooltip = vec![];
@@ -268,7 +268,7 @@ fn tooltip_function_method(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url
     
     let the_type = format_method(fmt_config, decl.unwrap_or(the_type()));
     
-    let docs = extract_docs(&vfs, def.span.file.as_ref(), def.span.range.row_start)
+    let docs = extract_and_process_docs(&vfs, def.span.file.as_ref(), def.span.range.row_start)
         .unwrap_or_else(|| def.docs.trim().into());
     
     let mut tooltip = vec![];
@@ -808,7 +808,7 @@ fn really_really_really_really_long_name(
 }
 
 #[test]
-fn test_extract_docs_module() {
+fn test_extract_and_process_docs_module() {
     let expected = "
 Sample module
 
@@ -826,12 +826,12 @@ let foo = sample::foo();
     let vfs = Vfs::new();
     let file = Path::new("test_data/hover/src/sample.rs");
     let row_start = Row::new_zero_indexed(0);
-    let actual = extract_docs(&vfs, file, row_start).expect("module docs");
+    let actual = extract_and_process_docs(&vfs, file, row_start).expect("module docs");
     assert_eq!(expected, actual, "hover/sample.rs module docs");
 }
 
 #[test]
-fn test_extract_docs() {
+fn test_extract_and_process_docs() {
     let expected = "
 The `Baz` variant
 
@@ -841,7 +841,7 @@ Aliquam erat volutpat.
     let vfs = Vfs::new();
     let file = Path::new("test_data/hover/src/sample.rs");
     let row_start = Row::new_zero_indexed(61);
-    let actual = extract_docs(&vfs, file, row_start).expect("module docs");
+    let actual = extract_and_process_docs(&vfs, file, row_start).expect("module docs");
     assert_eq!(expected, actual, "hover/sample.rs module docs");
 }
 
@@ -885,8 +885,10 @@ i: i32
     assert_eq!(expected, actual);
 }
 
-#[test]
-fn test_tooltip() {
+#[cfg(test)]
+pub mod test {
+    use super::*;
+
     use config;
     use analysis;
     use lsp_data::{ClientCapabilities, InitializationOptions};
@@ -896,93 +898,29 @@ fn test_tooltip() {
     use serde_json as json;
     use build::BuildPriority;
     
-    use std::env;
-    use std::fmt::Debug;
     use std::fs;
     use std::path::PathBuf;
     use std::process;
     use std::sync::Mutex;
 
-    let pid = process::id();
-    let cwd = env::current_dir().unwrap();
-    let project_dir = cwd.join("test_data").join("hover");
-    let client_caps = ClientCapabilities {
-        code_completion_has_snippet_support: true,
-        related_information_support: true
-    };
-
-    let vfs = Arc::new(Vfs::new());
-    let mut config = config::Config::default();
-    config.infer_defaults(&project_dir).expect("config::infer_defaults failed");
-    let config = Arc::new(Mutex::new(config));
-    let analysis = Arc::new(analysis::AnalysisHost::new(analysis::Target::Debug));
-
-    let ctx = InitActionContext::new(
-        analysis.clone(), 
-        vfs.clone(), 
-        config.clone(), 
-        client_caps, 
-        project_dir.clone(), 
-        pid, 
-        true
-    );
-
-    #[derive(Clone, Default)]
-    struct Out(Arc<Mutex<u64>>);
-
-    impl Output for Out {
-        fn response(&self, output: String) {
-            trace!("{}", output);
-        }
-
-        fn provide_id(&self) -> RequestId {
-            let mut id = self.0.lock().unwrap();
-            *id += 1;
-            RequestId::Num(*id as u64)
-        }
-    }
-    
-    let init_options = InitializationOptions::default();
-    let out = Out::default();
-    ctx.init(&init_options, &out);
-    ctx.build(&project_dir, BuildPriority::Immediate, &out);
-    ctx.block_on_build();
-
-    fn str_err<D: Debug>(e: &D) -> String { 
-        format!("{:?}", e)
-    }
-
-    let target_dir = env::var("CARGO_TARGET_DIR")
-        .map(|s| Path::new(&s).to_owned())
-        .unwrap_or_else(|_| {
-            cwd.join("target")
-        })
-        .join("debug")
-        .join("hover")
-        .join("tooltip_test_results");
-
-    fs::create_dir_all(&target_dir).expect("failed to create hover_test_data");
-
     #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
-    struct Test {
-        /// relative to test_data/hover/src
-        file: String,
-        /// one based
-        line: u64,
-        /// one based
-        col: u64,
+    pub struct Test {
+        /// Relative to the project _source_ dir (e.g. relative to test_data/hover/src)
+        pub file: String,
+        /// One-based line number
+        pub line: u64,
+        /// One-based column number
+        pub col: u64,
     }
 
     impl Test {
-        fn load_saved_result(&self, test_data_dir: &Path) -> Result<TestResult, String> {
-            let path = self.path(test_data_dir);
+        fn load_result(&self, dir: &Path) -> Result<TestResult, String> {
+            let path = self.path(dir);
             let file = fs::File::open(path.clone()).map_err(|e| {
-                eprintln!("failed to load hover test result: {:?} ({:?})", path, e);
-                str_err(&e)
+                format!("failed to open hover test result: {:?} ({:?})", path, e)
             })?;
             let result: Result<TestResult, String> = json::from_reader(file).map_err(|e| {
-                eprintln!("failed to parse hover test result: {:?} ({:?})", path, e);
-                str_err(&e)
+                format!("failed to deserialize hover test result: {:?} ({:?})", path, e)
             });
             result
         }
@@ -994,23 +932,51 @@ fn test_tooltip() {
         data: Result<Vec<MarkedString>, String>,
     }
 
+    // MarkedString nad LanguageString don't implement clone
+    impl Clone for TestResult {
+        fn clone(&self) -> TestResult {
+            let ls_clone = |ls: &LanguageString| {
+                LanguageString {
+                    language: ls.language.clone(),
+                    value: ls.value.clone()
+                }
+            };
+            let ms_clone = |ms: &MarkedString| {
+                match ms {
+                    MarkedString::String(ref s) => 
+                        MarkedString::String(s.clone()),
+                    MarkedString::LanguageString(ref ls) => 
+                        MarkedString::LanguageString(ls_clone(ls))
+                }
+            };
+            let test = self.test.clone();
+            let data = match self.data {
+                Ok(ref data) => Ok(data.iter().map(|ms| ms_clone(ms)).collect()),
+                Err(ref e) => Err(e.clone())
+            };
+            TestResult { test, data }
+        }
+    }
+
     impl TestResult {
-        fn save(&self, target_dir: &Path) {
-            let path = self.test.path(target_dir);
-            let data = json::to_string_pretty(&self)
-                .expect("failed to serialize hover test result");
-            fs::write(path, data)
-                .expect("failed to save hover test result");
+        fn save(&self, result_dir: &Path) -> Result<(), String> {
+            let path = self.test.path(result_dir);
+            let data = json::to_string_pretty(&self).map_err(|e| {
+                format!("failed to serialize hover test result: {:?} ({:?})", path, e)
+            })?;
+            fs::write(path.clone(), data).map_err(|e| {
+                format!("failed to save hover test result: {:?} ({:?})", path, e)
+            })
         }
     }
 
     impl Test {
-        fn new(file: &str, line: u64, col: u64) -> Test {
+        pub fn new(file: &str, line: u64, col: u64) -> Test {
             Test { file: file.into(), line, col }
         }
 
-        fn path(&self, target_dir: &Path) -> PathBuf {
-            target_dir.join(format!("{}.{:04}_{:03}.json", self.file, self.line, self.col))
+        fn path(&self, result_dir: &Path) -> PathBuf {
+            result_dir.join(format!("{}.{:04}_{:03}.json", self.file, self.line, self.col))
         }
 
         fn run(&self, project_dir: &Path, ctx: &InitActionContext) -> TestResult {
@@ -1018,7 +984,7 @@ fn test_tooltip() {
             let doc_id = TextDocumentIdentifier::new(url.clone());
             let position = Position::new(self.line - 1u64, self.col - 1u64);
             let params = TextDocumentPositionParams::new(doc_id, position);
-            let result = tooltip(&ctx, &params).map_err(|e| format!("{:?}", e));
+            let result = tooltip(&ctx, &params).map_err(|e| format!("tooltip error: {:?}", e));
             
             TestResult {
                 test: self.clone(),
@@ -1026,6 +992,184 @@ fn test_tooltip() {
             }
         }
     }
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct TestFailure {
+        /// The test case, indicating file, line, and column
+        pub test: Test,
+        /// The location of the loaded result input.
+        pub expect_file: PathBuf,
+        /// The location of the saved result output.
+        pub actual_file: PathBuf,
+        /// The expected outcome. The outer `Result` relates to errors while
+        /// loading saved data. The inner `Result` is the saved output from
+        /// `hover::tooltip`.
+        pub expect_data: Result<Result<Vec<MarkedString>, String>, String>,
+        /// The current output from `hover::tooltip`.
+        pub actual_data: Result<Vec<MarkedString>, String>,
+    }
+
+    #[derive(Clone, Default)]
+    pub struct LineOutput {
+        req_id: Arc<Mutex<u64>>,
+        lines: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl LineOutput {
+        /// Clears and returns the recorded output lines
+        pub fn reset(&self) -> Vec<String> {
+            let mut lines = self.lines.lock().unwrap();
+            let mut swaped = Vec::new();
+            ::std::mem::swap(&mut *lines, &mut swaped);
+            swaped
+        }
+    }
+
+    impl Output for LineOutput {
+        fn response(&self, output: String) {
+            self.lines.lock().unwrap().push(output);
+        }
+
+        fn provide_id(&self) -> RequestId {
+            let mut id = self.req_id.lock().unwrap();
+            *id += 1;
+            RequestId::Num(*id as u64)
+        }
+    }
+
+    pub struct TooltipTestHarness {
+        ctx: InitActionContext,
+        project_dir: PathBuf,
+    }
+
+    impl TooltipTestHarness {
+
+        /// Creates a new `TooltipTestHarness`. The `project_dir` must contain
+        /// a valid rust project with a `Cargo.toml`.
+        pub fn new<O: Output>(
+            project_dir: PathBuf,
+            output: &O
+        ) -> TooltipTestHarness
+        {
+            let pid = process::id();
+            let client_caps = ClientCapabilities {
+                code_completion_has_snippet_support: true,
+                related_information_support: true
+            };
+            let mut config = config::Config::default();
+            config
+                .infer_defaults(&project_dir)
+                .expect("config::infer_defaults failed");
+            let config = Arc::new(Mutex::new(config));
+            let analysis = Arc::new(analysis::AnalysisHost::new(analysis::Target::Debug));
+            let vfs = Arc::new(Vfs::new());
+
+            let ctx = InitActionContext::new(
+                analysis.clone(), 
+                vfs.clone(), 
+                config.clone(), 
+                client_caps, 
+                project_dir.clone(), 
+                pid, 
+                true
+            );
+
+            let init_options = InitializationOptions::default();
+            ctx.init(&init_options, output);
+            ctx.build(&project_dir, BuildPriority::Immediate, output);
+
+            TooltipTestHarness {
+                ctx,
+                project_dir
+            }
+        }
+
+        /// Execute a series of tooltip tests. The test results will be safed in `save_dir`. 
+        /// Each test will attempt to load a previous result from the `load_dir` and compare
+        /// the results. If a matching file can't be found or the compared data mismatches,
+        /// the test case fails. The output file names are derived from the source filename,
+        /// line number, and column. The execution will return an `Err` if either the save or
+        /// load directories do not exist nor could be created.
+        pub fn run_tests(
+            &self, 
+            tests: &Vec<Test>, 
+            load_dir: PathBuf, 
+            save_dir: PathBuf,
+        ) -> Result<Vec<TestFailure>, String>
+        {
+            fs::create_dir_all(&load_dir).map_err(|e|
+                format!("load_dir does not exist and could not be created: {:?} ({:?})", load_dir, e)
+            )?;
+            fs::create_dir_all(&save_dir).map_err(|e|
+                format!("save_dir does not exist and could not be created: {:?} ({:?})", save_dir, e)
+            )?;
+            self.ctx.block_on_build();
+
+            let results: Vec<TestResult> = tests.iter().map(|test| {
+                let result = test.run(&self.project_dir, &self.ctx);
+                result.save(&save_dir).unwrap();
+                result
+            })
+            .collect();
+
+            let failures: Vec<TestFailure> = results
+                .iter()
+                .map(|actual_result: &TestResult| {
+                    let actual_result = actual_result.clone();
+                    match actual_result.test.load_result(&load_dir) {
+                        Ok(expect_result) => {
+                            if actual_result.test != expect_result.test {
+                                let e = format!("Mismatched test: {:?}", expect_result.test);
+                                Some((Err(e.into()), actual_result))
+                            }
+                            else if actual_result == expect_result {
+                                None
+                            } else {
+                                Some((Ok(expect_result), actual_result))
+                            }
+                        }
+                        Err(e) => {
+                            Some((Err(e), actual_result))
+                        }
+                    }
+                })
+                .filter(|failed_result| failed_result.is_some())
+                .map(|failed_result| failed_result.unwrap())
+                .map(|failed_result| match failed_result {
+                    (Ok(expect_result), actual_result) => {
+                        let load_file = actual_result.test.path(&load_dir);
+                        let save_file = actual_result.test.path(&save_dir);
+                        TestFailure {
+                            test: actual_result.test,
+                            expect_data: Ok(expect_result.data),
+                            expect_file: load_file,
+                            actual_data: actual_result.data,
+                            actual_file: save_file,
+                        }
+                    }
+                    (Err(e), actual_result) => {
+                        let load_file = actual_result.test.path(&load_dir);
+                        let save_file = actual_result.test.path(&save_dir);
+                        TestFailure {
+                            test: actual_result.test,
+                            expect_data: Err(e.into()),
+                            expect_file: load_file,
+                            actual_data: actual_result.data,
+                            actual_file: save_file,
+                        }
+                    }
+                })
+                .collect();
+
+            Ok(failures)
+        }
+    }
+}
+
+#[test]
+fn test_tooltip_two() -> Result<(), Box<::std::error::Error>> {
+    use self::test::{TooltipTestHarness, LineOutput, Test};
+    use std::env;
 
     let tests = vec![
         Test::new("main.rs", 12, 12),
@@ -1088,52 +1232,23 @@ fn test_tooltip() {
         Test::new("sample.rs", 128, 11),
     ];
 
-    let results: Vec<TestResult> = tests.iter().map(|test| {
-        let result = test.run(&project_dir, &ctx);
-        result.save(&target_dir);
-        result
-    })
-    .collect();
+    let cwd = env::current_dir()?;
+    let out = LineOutput::default();
+    let proj_dir = cwd.join("test_data").join("hover");
+    let save_dir = cwd.join("target").join("hover").join("save_data");
+    let load_dir = proj_dir.join("save_data");
+    
+    let harness = TooltipTestHarness::new(proj_dir, &out);
 
-    let expected_tooltip_test_results_dir = project_dir.join("tooltip_test_results");
+    out.reset();
 
-    let failed_results: Vec<(&TestResult, Result<TestResult, String>)> = results.iter().map(|actual_result| {
-        match actual_result.test.load_saved_result(&expected_tooltip_test_results_dir) {
-            Ok(expect_result) => {
-                if actual_result == &expect_result {
-                    None
-                } else {
-                    Some((actual_result, Ok(expect_result)))
-                }
-            }
-            Err(e) => {
-                Some((actual_result, Err(str_err(&e))))
-            }
-        }
-    })
-    .filter(|failed_result| failed_result.is_some())
-    .map(|failed_result| failed_result.unwrap())
-    .collect();
+    let failures = harness.run_tests(&tests, load_dir, save_dir)?;
 
-    for actual_result in failed_results.iter() {
-        match actual_result {
-            (actual_result, Ok(expect_result)) => {
-                let project_file = expect_result.test.path(&expected_tooltip_test_results_dir);
-                let target_file = expect_result.test.path(&target_dir);
-                eprintln!("Expect hover tooltip result ({:?}):", project_file);
-                eprintln!("{}\n", json::to_string(&expect_result.data).unwrap());
-                eprintln!("Failed hover tooltip result ({:?}):", target_file);
-                eprintln!("{}\n", json::to_string(&actual_result.data).unwrap());
-            }
-            (expect_result, Err(e)) => {
-                let project_file = expect_result.test.path(&expected_tooltip_test_results_dir);
-                eprintln!("Failed to load saved tooltip result ({:?}): {:?}", project_file, e);
-            }
-        }
-        eprintln!("\n");
-    }
-
-    if !failed_results.is_empty() {
-        panic!("{} / {} hover tooltip tests failed", failed_results.len(), tests.len());
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        eprintln!("{}\n\n", out.reset().join("\n"));
+        eprintln!("{:#?}\n\n", failures);
+        Err(format!("{} of {} tooltip tests failed", failures.len(), tests.len()).into())
     }
 }
