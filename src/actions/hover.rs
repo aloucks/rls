@@ -1084,7 +1084,7 @@ pub mod test {
             }
         }
 
-        /// Execute a series of tooltip tests. The test results will be safed in `save_dir`. 
+        /// Execute a series of tooltip tests. The test results will be saved in `save_dir`.
         /// Each test will attempt to load a previous result from the `load_dir` and compare
         /// the results. If a matching file can't be found or the compared data mismatches,
         /// the test case fails. The output file names are derived from the source filename,
@@ -1167,7 +1167,7 @@ pub mod test {
 }
 
 #[test]
-fn test_tooltip_two() -> Result<(), Box<::std::error::Error>> {
+fn test_tooltip() -> Result<(), Box<::std::error::Error>> {
     use self::test::{TooltipTestHarness, LineOutput, Test};
     use std::env;
 
