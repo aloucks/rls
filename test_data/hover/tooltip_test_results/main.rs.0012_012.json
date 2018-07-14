@@ -8,7 +8,7 @@
     "Ok": [
       {
         "language": "rust",
-        "value": "src\\sample.rs"
+        "value": "src/sample.rs"
       },
       "Sample module\n\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas\ntincidunt tristique maximus. Sed venenatis urna vel sagittis tempus.\nIn hac habitasse platea dictumst.\n\n# Examples\n\n```rust\nlet foo = sample::foo();\n```"
     ]
