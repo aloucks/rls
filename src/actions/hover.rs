@@ -1116,13 +1116,15 @@ fn test_tooltip() {
                 let project_file = expect_result.test.path(&tooltip_test_results_dir);
                 let target_file = expect_result.test.path(&target_dir);
                 eprintln!("Expect hover tooltip result ({:?}):", project_file);
-                eprintln!("Actual hover tooltip result ({:?}):", target_file);
+                eprintln!("{}\n", json::to_string(&expect_result.data).unwrap());
+                eprintln!("Failed hover tooltip result ({:?}):", target_file);
+                eprintln!("{}\n", json::to_string(&failed_result.data).unwrap());
 
-                use difference::Changeset;
-                let expect = json::to_string(&expect_result.data).unwrap();
-                let actual = json::to_string(&failed_result.data).unwrap();
-                let changeset = Changeset::new(&expect, &actual, " ");
-                println!("{}", changeset);
+                // use difference::Changeset;
+                // let expect = json::to_string(&expect_result.data).unwrap();
+                // let actual = json::to_string(&failed_result.data).unwrap();
+                // let changeset = Changeset::new(&expect, &actual, " ");
+                // println!("{}", changeset);
 
             }
             (expect_result, Err(e)) => {
@@ -1130,9 +1132,10 @@ fn test_tooltip() {
                 eprintln!("Failed to load saved tooltip result ({:?}): {:?}", project_file, e);
             }
         }
+        eprintln!("\n");
     }
 
     if !failed_results.is_empty() {
-        panic!("One or more hover tooltip tests failed");
+        panic!("{} / {} hover tooltip tests failed", failed_results.len(), tests.len());
     }
 }
