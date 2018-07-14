@@ -48,6 +48,3 @@ difference = "2.0"
 [features]
 default = ["clippy_lints"]
 clippy = ["clippy_lints"]
-
-[profile.dev]
-opt-level = 2
