@@ -973,6 +973,21 @@ fn test_tooltip() {
         col: u64,
     }
 
+    impl Test {
+        fn load_saved_result(&self, test_data_dir: &Path) -> Result<TestResult, String> {
+            let path = self.path(test_data_dir);
+            let file = fs::File::open(path.clone()).map_err(|e| {
+                eprintln!("failed to load hover test result: {:?} ({:?})", path, e);
+                str_err(&e)
+            })?;
+            let result: Result<TestResult, String> = json::from_reader(file).map_err(|e| {
+                eprintln!("failed to parse hover test result: {:?} ({:?})", path, e);
+                str_err(&e)
+            });
+            result
+        }
+    }
+
     #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct TestResult {
         test: Test,
@@ -986,63 +1001,6 @@ fn test_tooltip() {
                 .expect("failed to serialize hover test result");
             fs::write(path, data)
                 .expect("failed to save hover test result");
-        }
-
-        fn load(&self, test_data_dir: &Path) -> Result<TestResult, String> {
-            let path = self.test.path(test_data_dir);
-            let file = fs::File::open(path.clone()).map_err(|e| {
-                eprintln!("failed to load hover test result: {:?} ({:?})", path, e);
-                str_err(&e)
-            })?;
-            let result: Result<TestResult, String> = json::from_reader(file).map_err(|e| {
-                eprintln!("failed to parse hover test result: {:?} ({:?})", path, e);
-                str_err(&e)
-            });
-            result
-        }
-
-        // The save-analysis is missing the info required to build doc urls
-        // on some platforms or there is a bug in the AnalysisHost. The 
-        // The travis build is failing due to the missing doc urls, so we'll
-        // ignore them for now.
-        fn matches(&self, other: &TestResult) -> bool {
-            // fn clone(v: &Vec<MarkedString>) -> Vec<MarkedString> {
-            //     v.iter().map(|ms| {
-            //         match ms {
-            //             MarkedString::String(ref s) => MarkedString::String(s.clone()),
-            //             MarkedString::LanguageString(ref ls) => MarkedString::LanguageString(LanguageString {
-            //                 language: ls.language.clone(),
-            //                 value: ls.value.clone()
-            //             })
-            //         }
-            //     })
-            //     .collect()
-            // }
-            // if self.data == other.data && self.test == other.test {
-            //     true
-            // } else if self.test == other.test {
-            //     // The doc url is always in the second position
-            //     match (&self.data, &other.data) {
-            //         (Ok(ref this_data), Ok(ref other_data)) => {
-            //             eprintln!("Attempting to ignore missing doc url: {}, (line: {}, col: {})", 
-            //                 self.test.file, self.test.line, self.test.col);
-            //             let mut this_data = clone(this_data);
-            //             let mut other_data = clone(other_data);
-            //             let this_len = this_data.len();
-            //             let other_len = other_data.len();
-            //             if this_len > 1 && this_len > other_len {
-            //                 this_data.swap_remove(1);
-            //             } else if other_len > 1 {
-            //                 other_data.swap_remove(1);
-            //             }
-            //             this_data == other_data
-            //         },
-            //         _ => false
-            //     }
-            // } else {
-            //     false
-            // }
-            self == other
         }
     }
 
@@ -1137,18 +1095,19 @@ fn test_tooltip() {
     })
     .collect();
 
-    let tooltip_test_results_dir = project_dir.join("tooltip_test_results");
-    let failed_results: Vec<(&TestResult, Result<TestResult, String>)> = results.iter().map(|result| {
-        match result.load(&tooltip_test_results_dir) {
+    let expected_tooltip_test_results_dir = project_dir.join("tooltip_test_results");
+
+    let failed_results: Vec<(&TestResult, Result<TestResult, String>)> = results.iter().map(|actual_result| {
+        match actual_result.test.load_saved_result(&expected_tooltip_test_results_dir) {
             Ok(expect_result) => {
-                if result.matches(&expect_result) {
+                if actual_result == &expect_result {
                     None
                 } else {
-                    Some((result, Ok(expect_result)))
+                    Some((actual_result, Ok(expect_result)))
                 }
             }
             Err(e) => {
-                Some((result, Err(str_err(&e))))
+                Some((actual_result, Err(str_err(&e))))
             }
         }
     })
@@ -1156,25 +1115,18 @@ fn test_tooltip() {
     .map(|failed_result| failed_result.unwrap())
     .collect();
 
-    for failed_result in failed_results.iter() {
-        match failed_result {
-            (failed_result, Ok(expect_result)) => {
-                let project_file = expect_result.test.path(&tooltip_test_results_dir);
+    for actual_result in failed_results.iter() {
+        match actual_result {
+            (actual_result, Ok(expect_result)) => {
+                let project_file = expect_result.test.path(&expected_tooltip_test_results_dir);
                 let target_file = expect_result.test.path(&target_dir);
                 eprintln!("Expect hover tooltip result ({:?}):", project_file);
                 eprintln!("{}\n", json::to_string(&expect_result.data).unwrap());
                 eprintln!("Failed hover tooltip result ({:?}):", target_file);
-                eprintln!("{}\n", json::to_string(&failed_result.data).unwrap());
-
-                // use difference::Changeset;
-                // let expect = json::to_string(&expect_result.data).unwrap();
-                // let actual = json::to_string(&failed_result.data).unwrap();
-                // let changeset = Changeset::new(&expect, &actual, " ");
-                // println!("{}", changeset);
-
+                eprintln!("{}\n", json::to_string(&actual_result.data).unwrap());
             }
             (expect_result, Err(e)) => {
-                let project_file = expect_result.test.path(&tooltip_test_results_dir);
+                let project_file = expect_result.test.path(&expected_tooltip_test_results_dir);
                 eprintln!("Failed to load saved tooltip result ({:?}): {:?}", project_file, e);
             }
         }
