@@ -1,0 +1,19 @@
+{
+  "test": {
+    "file": "sample.rs",
+    "line": 90,
+    "col": 53
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "sample::Foo<T>"
+      },
+      {
+        "language": "rust",
+        "value": "let f = Foo { t: the_really_long_name_foo.t };"
+      }
+    ]
+  }
+}

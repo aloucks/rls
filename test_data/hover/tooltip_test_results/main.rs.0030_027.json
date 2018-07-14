@@ -1,0 +1,16 @@
+{
+  "test": {
+    "file": "main.rs",
+    "line": 30,
+    "col": 27
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "pub struct Foo<T>"
+      },
+      "Sample struct\n\nProin finibus, risus ac egestas fermentum, enim diam bibendum magna,\nvitae cursus dui odio a neque.\n\n# Example\n\n```rust\nlet foo = Foo { t: 1 };\n```"
+    ]
+  }
+}

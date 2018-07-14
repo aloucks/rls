@@ -1,0 +1,17 @@
+{
+  "test": {
+    "file": "main.rs",
+    "line": 38,
+    "col": 31
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "pub struct Box<T: ?Sized>(_)"
+      },
+      "https://doc.rust-lang.org/nightly/alloc/boxed/Box.t.html",
+      "A pointer type for heap allocation.\n\nSee the [module-level documentation](../../std/boxed/index.html) for more."
+    ]
+  }
+}

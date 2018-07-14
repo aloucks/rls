@@ -1,0 +1,15 @@
+{
+  "test": {
+    "file": "sample.rs",
+    "line": 119,
+    "col": 14
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "pub fn multiple_lines(s: String, i: i32)"
+      }
+    ]
+  }
+}

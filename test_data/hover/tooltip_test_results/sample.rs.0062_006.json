@@ -1,0 +1,16 @@
+{
+  "test": {
+    "file": "sample.rs",
+    "line": 62,
+    "col": 6
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "Bar::Baz"
+      },
+      "The `Baz` variant\n\nAliquam erat volutpat."
+    ]
+  }
+}

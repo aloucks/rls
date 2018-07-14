@@ -1,0 +1,17 @@
+{
+  "test": {
+    "file": "main.rs",
+    "line": 31,
+    "col": 7
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "pub fn drop<T>(_x: T)"
+      },
+      "https://doc.rust-lang.org/nightly/core/mem/drop.v.html",
+      "Disposes of a value.\n\nWhile this does call the argument's implementation of [`Drop`][drop],\nit will not release any borrows, as borrows are based on lexical scope.\n\nThis effectively does nothing for\n[types which implement `Copy`](../../book/first-edition/ownership.html#copy-types),\ne.g. integers. Such values are copied and _then_ moved into the function,\nso the value persists after this function call.\n\nThis function is not magic; it is literally defined as\n\n```rust\npub fn drop<T>(_x: T) { }\n```\n\nBecause `_x` is moved into the function, it is automatically dropped before\nthe function returns.\n\n[drop]: ../ops/trait.Drop.html\n\n# Examples\n\nBasic usage:\n\n```rust\nlet v = vec![1, 2, 3];\n\ndrop(v); // explicitly drop the vector\n```\n\nBorrows are based on lexical scope, so this produces an error:\n\n```rust\nlet mut v = vec![1, 2, 3];\nlet x = &v[0];\n\ndrop(x); // explicitly drop the reference, but the borrow still exists\n\nv.push(4); // error: cannot borrow `v` as mutable because it is also\n           // borrowed as immutable\n```\n\nAn inner scope is needed to fix this:\n\n```rust\nlet mut v = vec![1, 2, 3];\n\n{\n    let x = &v[0];\n\n    drop(x); // this is now redundant, as `x` is going out of scope anyway\n}\n\nv.push(4); // no problems\n```\n\nSince [`RefCell`] enforces the borrow rules at runtime, `drop` can\nrelease a [`RefCell`] borrow:\n\n```rust\nuse std::cell::RefCell;\n\nlet x = RefCell::new(1);\n\nlet mut mutable_borrow = x.borrow_mut();\n*mutable_borrow = 1;\n\ndrop(mutable_borrow); // relinquish the mutable borrow on this slot\n\nlet borrow = x.borrow();\nprintln!(\"{}\", *borrow);\n```\n\nIntegers and other types implementing [`Copy`] are unaffected by `drop`.\n\n```rust\n#[derive(Copy, Clone)]\nstruct Foo(u8);\n\nlet x = 1;\nlet y = Foo(2);\ndrop(x); // a copy of `x` is moved and dropped\ndrop(y); // a copy of `y` is moved and dropped\n\nprintln!(\"x: {}, y: {}\", x, y.0); // still available\n```\n\n[`RefCell`]: ../../std/cell/struct.RefCell.html\n[`Copy`]: ../../std/marker/trait.Copy.html"
+    ]
+  }
+}

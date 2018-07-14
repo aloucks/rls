@@ -1,0 +1,16 @@
+{
+  "test": {
+    "file": "sample.rs",
+    "line": 81,
+    "col": 14
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "pub fn new() -> NewType"
+      },
+      "Creates a `NewType`\n\n# Examples\n\n```rust\nlet a = NewType::new();\n```"
+    ]
+  }
+}

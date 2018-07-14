@@ -1,0 +1,16 @@
+{
+  "test": {
+    "file": "main.rs",
+    "line": 15,
+    "col": 15
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "pub enum Bar"
+      },
+      "Sample enum\n\nPraesent at cursus ipsum, eu ornare dui. Nunc lobortis venenatis nulla eget\nviverra. Nam tincidunt aliquam augue vitae consequat."
+    ]
+  }
+}

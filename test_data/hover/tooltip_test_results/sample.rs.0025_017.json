@@ -1,0 +1,17 @@
+{
+  "test": {
+    "file": "sample.rs",
+    "line": 25,
+    "col": 17
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "pub trait Add<RHS = Self>"
+      },
+      "https://doc.rust-lang.org/nightly/core/ops/arith/Add.t.html",
+      "The addition operator `+`."
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "test": {
+    "file": "main.rs",
+    "line": 43,
+    "col": 25
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "pub fn foo() -> Foo<u32>"
+      },
+      "Sample function\n\nUt molestie euismod mollis. In viverra tempor sollicitudin. In orci nisi,\nultricies in semper non, faucibus in nisl."
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "test": {
+    "file": "sample.rs",
+    "line": 50,
+    "col": 10
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "T"
+      },
+      "The `t` field\n\nNulla tincidunt lobortis semper."
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "test": {
+    "file": "sample.rs",
+    "line": 89,
+    "col": 43
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "sample::Foo<T>"
+      }
+    ]
+  }
+}

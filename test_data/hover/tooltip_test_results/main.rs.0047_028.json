@@ -1,0 +1,16 @@
+{
+  "test": {
+    "file": "main.rs",
+    "line": 47,
+    "col": 28
+  },
+  "data": {
+    "Ok": [
+      {
+        "language": "rust",
+        "value": "pub fn bar<T: Copy + Add>(\n    &self,\n    the_really_long_name_string: String,\n    the_really_long_name_foo: Foo<T>,\n) -> Vec<(String, Foo<T>)>"
+      },
+      "Bar method\n\nDonec vestibulum ligula id vehicula luctus."
+    ]
+  }
+}

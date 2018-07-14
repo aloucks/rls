@@ -1,0 +1,6 @@
+[package]
+name = "hover"
+version = "0.1.0"
+authors = ["hover <hover@test.org>"]
+
+[dependencies]
