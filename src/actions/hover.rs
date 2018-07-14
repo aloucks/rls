@@ -1094,11 +1094,11 @@ fn test_tooltip() {
     let tooltip_test_results_dir = project_dir.join("tooltip_test_results");
     let failed_results: Vec<(&TestResult, Result<TestResult, String>)> = results.iter().map(|result| {
         match result.load(&tooltip_test_results_dir) {
-            Ok(saved_result) => {
-                if result.data == saved_result.data {
+            Ok(expect_result) => {
+                if result.data == expect_result.data {
                     None
                 } else {
-                    Some((result, Ok(saved_result)))
+                    Some((result, Ok(expect_result)))
                 }
             }
             Err(e) => {
@@ -1112,7 +1112,7 @@ fn test_tooltip() {
 
     for failed_result in failed_results.iter() {
         match failed_result {
-            (expect_result, Ok(failed_result)) => {
+            (failed_result, Ok(expect_result)) => {
                 let project_file = expect_result.test.path(&tooltip_test_results_dir);
                 let target_file = expect_result.test.path(&target_dir);
                 eprintln!("Expect hover tooltip result ({:?}):", project_file);
