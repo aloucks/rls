@@ -137,9 +137,8 @@ pub fn extract_docs(
             // Ignore non-doc comments, but continue scanning. This is
             // required to skip copyright notices at the start of modules.
             continue;
-        } else if line.is_empty() && !up {
-            // Ignore the gap that's often between the copyright notice
-            // and module level docs.
+        } else if line.is_empty() {
+            // Ignore gaps
             continue;
         } else if line.starts_with("////") {
             // Break if we reach a comment header block (which is frequent
@@ -159,9 +158,10 @@ fn extract_and_process_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndexed>)
         .map_err(|e| {
             error!("failed to extract docs: row: {:?}, file: {:?} ({:?})", row_start, file, e);
         })
+        .ok()
         .map(|docs| docs.join("\n"))
         .map(|docs| process_docs(&docs))
-        .ok()
+        .and_then(|docs| empty_to_none(docs))
 }
 
 /// Extracts a function, method, struct, enum, or trait decleration from source.
@@ -277,7 +277,7 @@ fn tooltip_function_method(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url
 }
 
 fn empty_to_none(s: String) -> Option<String> {
-    if s.is_empty() {
+    if s.trim().is_empty() {
         None
     } else {
         Some(s)
@@ -1294,6 +1294,8 @@ fn test_tooltip() -> Result<(), Box<::std::error::Error>> {
         Test::new("sample.rs", 107, 13),
         Test::new("sample.rs", 119, 14),
         Test::new("sample.rs", 128, 11),
+        Test::new("sample.rs", 131, 14),
+        Test::new("sample.rs", 131, 26),
     ];
 
     let cwd = env::current_dir()?;

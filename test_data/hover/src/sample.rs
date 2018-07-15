@@ -127,3 +127,5 @@ pub fn multiple_lines(
 pub fn bar() -> Bar {
     Bar::Baz
 }
+
+use std::collections::HashMap;
