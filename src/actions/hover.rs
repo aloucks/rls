@@ -94,6 +94,10 @@ pub fn extract_and_process_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndex
                 if line.starts_with("#") {
                     // Ignore meta attributes
                     continue;
+                } else if line.starts_with("///") && !preceeding {
+                    break;
+                } else if line.starts_with("//!") && preceeding {
+                    break;
                 } else if line.starts_with("///") || line.starts_with("//!") {
                     let pos = if line.chars().skip(3).next().map(|c| c.is_whitespace()).unwrap_or(false) {
                         4
@@ -110,7 +114,7 @@ pub fn extract_and_process_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndex
                     // Ignore non-doc comments, but continue scanning. This is required to skip copyright
                     // notices at the start of modules.
                     continue;
-                } else if line.is_empty() {
+                } else if line.is_empty() && !preceeding {
                     // Ignore the gap that's often between the copyright notice and module level docs.
                     continue;
                 } else if line.starts_with("////") {
@@ -136,8 +140,8 @@ pub fn extract_and_process_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndex
 }
 
 /// Extracts a function, method, struct, enum, or trait decleration from source.
-fn extract_decleration(vfs: &Vfs, file: &Path, mut row: Row<ZeroIndexed>) -> Result<Vec<String>, vfs::Error> {
-    debug!("extract_decleration: row_start: {:?}, file: {:?}", row, file);
+pub fn extract_decl(vfs: &Vfs, file: &Path, mut row: Row<ZeroIndexed>) -> Result<Vec<String>, vfs::Error> {
+    debug!("extract_decl: row_start: {:?}, file: {:?}", row, file);
     let mut lines = Vec::new();
     loop {
         match vfs.load_line(file, row) {
@@ -157,7 +161,7 @@ fn extract_decleration(vfs: &Vfs, file: &Path, mut row: Row<ZeroIndexed>) -> Res
                 }
             },
             Err(e) => {
-                trace!("extract_decleration error: {:?}", e);
+                trace!("extract_decl error: {:?}", e);
                 return Err(e);
             }
         }
@@ -217,7 +221,7 @@ fn tooltip_struct_enum_union_trait(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def,
     };
 
     let the_type = {
-        let decl = extract_decleration(vfs, &def.span.file, def.span.range.row_start)
+        let decl = extract_decl(vfs, &def.span.file, def.span.range.row_start)
             .map(|lines| lines.join("\n"))
             .unwrap_or(the_type());
         format_object(fmt_config, decl.to_string())
@@ -263,7 +267,7 @@ fn tooltip_function_method(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url
         .replacen("fn ", &format!("fn {}", def.name), 1)
         .replace("> (", ">(").replace("->(", "-> (");
 
-    let decl = extract_decleration(vfs, &def.span.file, def.span.range.row_start)
+    let decl = extract_decl(vfs, &def.span.file, def.span.range.row_start)
         .map(|lines| lines.join("\n"));
     
     let the_type = format_method(fmt_config, decl.unwrap_or(the_type()));
@@ -846,7 +850,7 @@ Aliquam erat volutpat.
 }
 
 #[test]
-fn test_extract_decleration() {
+fn test_extract_decl() {
     let vfs = Vfs::new();
     let file = Path::new("test_data/hover/src/sample.rs");
 
@@ -856,7 +860,7 @@ where T: Copy,
 U: Clone
     ".trim();
     let row_start = Row::new_zero_indexed(112);
-    let actual = extract_decleration(&vfs, file, row_start).expect("trait decleration").join("\n");
+    let actual = extract_decl(&vfs, file, row_start).expect("trait decleration").join("\n");
     assert_eq!(expected, actual);
 
     let expected = "
@@ -866,22 +870,22 @@ i: i32
 )
     ".trim();
     let row_start = Row::new_zero_indexed(118);
-    let actual = extract_decleration(&vfs, file, row_start).expect("function decleration").join("\n");
+    let actual = extract_decl(&vfs, file, row_start).expect("function decleration").join("\n");
     assert_eq!(expected, actual);
 
     let expected = "fn make_copy(&self) -> Self";
     let row_start = Row::new_zero_indexed(102);
-    let actual = extract_decleration(&vfs, file, row_start).expect("method decleration").join("\n");
+    let actual = extract_decl(&vfs, file, row_start).expect("method decleration").join("\n");
     assert_eq!(expected, actual);
 
     let expected = "pub struct NewType(pub u32, f32)";
     let row_start = Row::new_zero_indexed(70);
-    let actual = extract_decleration(&vfs, file, row_start).expect("tuple decleration").join("\n");
+    let actual = extract_decl(&vfs, file, row_start).expect("tuple decleration").join("\n");
     assert_eq!(expected, actual);
 
     let expected = "pub struct Foo<T>";
     let row_start = Row::new_zero_indexed(45);
-    let actual = extract_decleration(&vfs, file, row_start).expect("struct decleration").join("\n");
+    let actual = extract_decl(&vfs, file, row_start).expect("struct decleration").join("\n");
     assert_eq!(expected, actual);
 }
 
