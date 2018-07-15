@@ -12,8 +12,11 @@ use config::FmtConfig;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Cleanup documentation code blocks. The `docs` are expected to have the preceeding `///` or `//!`
-/// prefixes already trimmed.
+/// Cleanup documentation code blocks. The `docs` are expected to have 
+/// the preceeding `///` or `//!` prefixes already trimmed away. Rust code
+/// blocks will ignore lines beginning with `#`. Code block annotations
+/// that are common to Rust will be converted to `to allow for markdown
+/// syntax coloring.
 pub fn process_docs(docs: &str) -> String {
     trace!("process_docs");
     let mut in_codeblock = false;
@@ -59,84 +62,106 @@ pub fn process_docs(docs: &str) -> String {
     processed_docs.join("\n")
 }
 
-/// Extracts documentation from the `file` at the specified `row_start`. If the row is
-/// equal to `0`, the scan will include the current row and move _downward_. Otherwise,
-/// the scan will ignore the specified row and move _upward_.
-/// 
-/// The documentation is run through a post-process to cleanup code blocks.
-pub fn extract_and_process_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndexed>) -> Option<String> {
-    let preceeding = if row_start.0 == 0 { false } else { true };
-    let direction = if preceeding { "up" } else { "down" };
-    debug!("extract_docs: row_start = {:?}, direction = {:?}, file = {:?}", row_start, direction, file);
+/// Extracts documentation from the `file` at the specified `row_start`.
+/// If the row is equal to `0`, the scan will include the current row
+/// and move _downward_. Otherwise, the scan will ignore the specified
+/// row and move _upward_.
+pub fn extract_docs(
+    vfs: &Vfs,
+    file: &Path, 
+    row_start: Row<ZeroIndexed>
+) -> Result<Vec<String>, vfs::Error> {
+    let up = if row_start.0 == 0 { false } else { true };
+    debug!("extract_docs: row_start = {:?}, up = {:?}, file = {:?}", row_start, up, file);
 
     let mut docs: Vec<String> = Vec::new();
-    let mut row = if preceeding { 
+    let mut row = if up { 
         Row::new_zero_indexed(row_start.0.saturating_sub(1)) 
     } else {
         Row::new_zero_indexed(row_start.0)
     };
+    let mut in_meta = false;
     loop {
-        match vfs.load_line(file, row) {
-            Ok(line) => {
-                let next_row = if preceeding { 
-                    Row::new_zero_indexed(row.0.saturating_sub(1)) 
-                } else {
-                    Row::new_zero_indexed(row.0.saturating_add(1))
-                };
-                if row == next_row {
-                    warn!("extract_docs: bailing out: prev_row == next_row; next_row = {:?}", next_row);
-                    break;
-                } else {
-                    row = next_row;
-                }
-                let line = line.trim();
-                trace!("extract_docs: row = {:?}, line = {}", row, line);
-                if line.starts_with("#") {
-                    // Ignore meta attributes
-                    continue;
-                } else if line.starts_with("///") && !preceeding {
-                    break;
-                } else if line.starts_with("//!") && preceeding {
-                    break;
-                } else if line.starts_with("///") || line.starts_with("//!") {
-                    let pos = if line.chars().skip(3).next().map(|c| c.is_whitespace()).unwrap_or(false) {
-                        4
-                    } else {
-                        3
-                    };
-                    let doc_line = line[pos..].into();
-                    if preceeding {
-                        docs.insert(0, doc_line);
-                    } else {
-                        docs.push(doc_line);
-                    }
-                } else if line.starts_with("//") {
-                    // Ignore non-doc comments, but continue scanning. This is required to skip copyright
-                    // notices at the start of modules.
-                    continue;
-                } else if line.is_empty() && !preceeding {
-                    // Ignore the gap that's often between the copyright notice and module level docs.
-                    continue;
-                } else if line.starts_with("////") {
-                    // Break if we reach a comment header block (which is frequent in the standard library)
-                    break;
-                } else {
-                    // Otherwise, we've reached the end of the docs 
-                    break;
-                }
-            },
-            Err(e) => {
-                error!("extract_docs: error = {:?}", e);
+        let line = vfs.load_line(file, row)?;
+        let next_row = if up { 
+            Row::new_zero_indexed(row.0.saturating_sub(1)) 
+        } else {
+            Row::new_zero_indexed(row.0.saturating_add(1))
+        };
+        if row == next_row {
+            warn!("extract_docs: bailing out: prev_row == next_row; next_row = {:?}", next_row);
+            break;
+        } else {
+            row = next_row;
+        }
+
+        let line = line.trim();
+        trace!("extract_docs: row = {:?}, line = {}", row, line);
+
+        if line.starts_with("#[") && line.ends_with("]") {
+            // Ignore single line meta attributes
+            continue;
+        } 
+        
+        // Contine with the next line when transitioning out of a 
+        // multi-line attribute
+        if line.starts_with("#[") {
+            in_meta = !in_meta;
+            if !in_meta { continue };
+        } else if line.ends_with("]") && !line.starts_with("//") {
+            in_meta = !in_meta;
+            if !in_meta { continue };
+        }
+        
+        if in_meta {
+            // Ignore milti-line attributes
+            continue;
+        } else if line.starts_with("///") && !up {
+            // Prevent loading non-mod docs for modules
+            break;
+        } else if line.starts_with("//!") && up {
+            // Prevent loading mod-docs for non-modules
+            break;
+        } else if line.starts_with("///") || line.starts_with("//!") {
+            let pos = if line.chars().skip(3).next().map(|c| c.is_whitespace()).unwrap_or(false) {
+                4
+            } else {
+                3
+            };
+            let doc_line = line[pos..].into();
+            if up {
+                docs.insert(0, doc_line);
+            } else {
+                docs.push(doc_line);
             }
+        } else if line.starts_with("//") {
+            // Ignore non-doc comments, but continue scanning. This is
+            // required to skip copyright notices at the start of modules.
+            continue;
+        } else if line.is_empty() && !up {
+            // Ignore the gap that's often between the copyright notice
+            // and module level docs.
+            continue;
+        } else if line.starts_with("////") {
+            // Break if we reach a comment header block (which is frequent
+            // in the standard library)
+            break;
+        } else {
+            // Otherwise, we've reached the end of the docs
+            break;
         }
     }
     trace!("extract_docs: lines = {:?}", docs);
-    let docs = process_docs(&docs.join("\n"));
-    if docs.trim().is_empty() {
-        None
-    } else {
-        Some(docs)
-    }
+    Ok(docs)
+}
+
+fn extract_and_process_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndexed>) -> Option<String> {
+    extract_docs(vfs, file, row_start).map_err(|e| {
+        error!("failed to extract docs: row: {:?}, file: {:?} ({:?})", row_start, file, e);
+    })
+    .map(|docs| docs.join("\n"))
+    .map(|docs| process_docs(&docs))
+    .ok()
 }
 
 /// Extracts a function, method, struct, enum, or trait decleration from source.

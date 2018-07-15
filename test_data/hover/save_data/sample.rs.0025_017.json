@@ -11,7 +11,7 @@
         "value": "pub trait Add<RHS = Self>"
       },
       "https://doc.rust-lang.org/nightly/core/ops/arith/Add.t.html",
-      "The addition operator `+`."
+      "The addition operator `+`.\n\nNote that `RHS` is `Self` by default, but this is not mandatory. For\nexample, [`std::time::SystemTime`] implements `Add<Duration>`, which permits\noperations of the form `SystemTime = SystemTime + Duration`.\n\n[`std::time::SystemTime`]: ../../std/time/struct.SystemTime.html\n\n# Examples\n\n## `Add`able points\n\n```rust\nuse std::ops::Add;\n\n#[derive(Debug, PartialEq)]\nstruct Point {\n    x: i32,\n    y: i32,\n}\n\nimpl Add for Point {\n    type Output = Point;\n\n    fn add(self, other: Point) -> Point {\n        Point {\n            x: self.x + other.x,\n            y: self.y + other.y,\n        }\n    }\n}\n\nassert_eq!(Point { x: 1, y: 0 } + Point { x: 2, y: 3 },\n           Point { x: 3, y: 3 });\n```\n\n## Implementing `Add` with generics\n\nHere is an example of the same `Point` struct implementing the `Add` trait\nusing generics.\n\n```rust\nuse std::ops::Add;\n\n#[derive(Debug, PartialEq)]\nstruct Point<T> {\n    x: T,\n    y: T,\n}\n\n// Notice that the implementation uses the associated type `Output`.\nimpl<T: Add<Output=T>> Add for Point<T> {\n    type Output = Point<T>;\n\n    fn add(self, other: Point<T>) -> Point<T> {\n        Point {\n            x: self.x + other.x,\n            y: self.y + other.y,\n        }\n    }\n}\n\nassert_eq!(Point { x: 1, y: 0 } + Point { x: 2, y: 3 },\n           Point { x: 3, y: 3 });\n```"
     ]
   }
 }
