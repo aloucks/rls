@@ -96,14 +96,13 @@ pub fn extract_docs(
         }
 
         let line = line.trim();
-        trace!("extract_docs: row = {:?}, line = {}", row, line);
 
         if line.starts_with("#[") && line.ends_with("]") {
-            // Ignore single line meta attributes
+            // Ignore single line attributes
             continue;
         } 
         
-        // Contine with the next line when transitioning out of a 
+        // Continue with the next line when transitioning out of a
         // multi-line attribute
         if line.starts_with("#[") {
             in_meta = !in_meta;
@@ -151,17 +150,18 @@ pub fn extract_docs(
             break;
         }
     }
-    trace!("extract_docs: lines = {:?}", docs);
+    debug!("extract_docs: row_end = {:?} (exclusive), up = {:?}, file = {:?}", row, up, file);
     Ok(docs)
 }
 
 fn extract_and_process_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndexed>) -> Option<String> {
-    extract_docs(vfs, file, row_start).map_err(|e| {
-        error!("failed to extract docs: row: {:?}, file: {:?} ({:?})", row_start, file, e);
-    })
-    .map(|docs| docs.join("\n"))
-    .map(|docs| process_docs(&docs))
-    .ok()
+    extract_docs(vfs, file, row_start)
+        .map_err(|e| {
+            error!("failed to extract docs: row: {:?}, file: {:?} ({:?})", row_start, file, e);
+        })
+        .map(|docs| docs.join("\n"))
+        .map(|docs| process_docs(&docs))
+        .ok()
 }
 
 /// Extracts a function, method, struct, enum, or trait decleration from source.
@@ -186,7 +186,7 @@ pub fn extract_decl(vfs: &Vfs, file: &Path, mut row: Row<ZeroIndexed>) -> Result
                 }
             },
             Err(e) => {
-                trace!("extract_decl error: {:?}", e);
+                error!("extract_decl: error: {:?}", e);
                 return Err(e);
             }
         }
@@ -195,7 +195,7 @@ pub fn extract_decl(vfs: &Vfs, file: &Path, mut row: Row<ZeroIndexed>) -> Result
 }
 
 fn tooltip_local_variable_usage(vfs: &Vfs, def: &Def) -> Vec<MarkedString> {
-    let the_type = def.value.trim();
+    let the_type = def.value.trim().into();
     let mut context = String::new();
     match vfs.load_line(&def.span.file, def.span.range.row_start) {
         Ok(line) => {
@@ -209,123 +209,161 @@ fn tooltip_local_variable_usage(vfs: &Vfs, def: &Def) -> Vec<MarkedString> {
         context.push_str(" ... }");
     }
 
-    let mut tooltip = vec![];
-    tooltip.push(MarkedString::from_language_code("rust".into(), the_type.into()));
-    if !context.is_empty() {
-        tooltip.push(MarkedString::from_language_code("rust".into(), context));
-    }
+    let context = empty_to_none(context);
+    let docs = None;
+    let doc_url = None;
 
-    tooltip
+    create_toolip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_field_or_variant(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
-    let the_type = def.value.trim();
-    let docs = extract_and_process_docs(&vfs, def.span.file.as_ref(), def.span.range.row_start)
-        .unwrap_or_else(|| def.docs.trim().into());
+    debug!("tooltip_field_or_variant: {}", def.name);
 
-    let mut tooltip = vec![];
-    tooltip.push(MarkedString::from_language_code("rust".into(), the_type.into()));
-    if let Some(doc_url) = doc_url {
-        tooltip.push(MarkedString::from_markdown(doc_url));
-    }
-    if !docs.is_empty() {
-        tooltip.push(MarkedString::from_markdown(docs));
-    }
+    let the_type = def.value.trim().into();
+    let docs = def_docs(def, vfs);
+    let context = None;
 
-    tooltip
+    create_toolip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_struct_enum_union_trait(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+    debug!("tooltip_struct_enum_union_trait: {}", def.name);
+
     // fallback in case source extration fails
     let the_type = || match def.kind {
         DefKind::Struct => format!("struct {}", def.name),
         DefKind::Enum => format!("enum {}", def.name),
         DefKind::Union => format!("union {}", def.name),
         DefKind::Trait => format!("trait {}", def.value),
-        _ => def.value.trim().into()
+        _ => def.value.trim().to_string()
     };
 
-    let the_type = {
-        let decl = extract_decl(vfs, &def.span.file, def.span.range.row_start)
-            .map(|lines| lines.join("\n"))
-            .unwrap_or(the_type());
-        format_object(fmt_config, decl.to_string())
-    };
-    
-    let docs = extract_and_process_docs(vfs, def.span.file.as_ref(), def.span.range.row_start)
-        .unwrap_or_else(|| def.docs.trim().into());
-    
-    let mut tooltip = vec![];
-    tooltip.push(MarkedString::from_language_code("rust".into(), the_type));
-    if let Some(doc_url) = doc_url {
-        tooltip.push(MarkedString::from_markdown(doc_url));
-    }
-    if !docs.is_empty() {
-        tooltip.push(MarkedString::from_markdown(docs));
-    }
-    
-    tooltip
+    let decl = def_decl(def, vfs, the_type);
+
+    let the_type = format_object(fmt_config, decl);
+    let docs = def_docs(def, vfs);
+    let context = None;
+
+    create_toolip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_mod(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+    debug!("tooltip_mod: name: {}", def.name);
+
     let the_type = def.value.trim();
     let the_type = the_type.replace("\\\\", "/");
     let the_type = the_type.replace("\\", "/");
 
-    let docs = extract_and_process_docs(vfs, def.span.file.as_ref(), def.span.range.row_start)
-        .unwrap_or_else(|| def.docs.trim().into());
-    
-    let mut tooltip = vec![];
-    tooltip.push(MarkedString::from_language_code("rust".into(), the_type.into()));
-    if let Some(doc_url) = doc_url {
-        tooltip.push(MarkedString::from_markdown(doc_url));
-    }
-    if !docs.is_empty() {
-        tooltip.push(MarkedString::from_markdown(docs));
-    }
-    
-    tooltip
+    let docs = def_docs(def, vfs);
+    let context = None;
+
+    create_toolip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_function_method(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+    debug!("tooltip_function_method: {}", def.name);
+
     let the_type = || def.value.trim()
         .replacen("fn ", &format!("fn {}", def.name), 1)
         .replace("> (", ">(").replace("->(", "-> (");
 
-    let decl = extract_decl(vfs, &def.span.file, def.span.range.row_start)
-        .map(|lines| lines.join("\n"));
-    
-    let the_type = format_method(fmt_config, decl.unwrap_or(the_type()));
-    
+    let decl = def_decl(def, vfs, the_type);
+
+    let the_type = format_method(fmt_config, decl);
+    let context = None;
+    let docs = def_docs(def, vfs);
+
+    create_toolip(the_type, doc_url, context, docs)
+}
+
+fn empty_to_none(s: String) -> Option<String> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// Extract and process source documentation for the give `def`.
+fn def_docs(def: &Def, vfs: &Vfs) -> Option<String> {
+    let save_analysis_docs = || empty_to_none(def.docs.trim().into());
     let docs = extract_and_process_docs(&vfs, def.span.file.as_ref(), def.span.range.row_start)
-        .unwrap_or_else(|| def.docs.trim().into());
-    
+        .or_else(save_analysis_docs)
+        .filter(|docs| !docs.trim().is_empty());
+    docs
+}
+
+/// Returns the type or function declaration from source. If source
+/// extraction fails, the result of `the_type` is used as a fallback.
+fn def_decl<F>(
+    def: &Def,
+    vfs: &Vfs,
+    the_type: F
+) -> String
+where
+    F: FnOnce() -> String
+{
+    extract_decl(vfs, &def.span.file, def.span.range.row_start)
+        .map(|lines| lines.join("\n"))
+        .ok()
+        .or_else(|| Some(the_type()))
+        .unwrap()
+}
+
+/// Creates a tooltip using the function, type or other declaration and 
+/// optional doc URL, context, or markdown documentation. No additional
+/// processing or formatting is performed.
+fn create_toolip(
+    the_type: String,
+    doc_url: Option<String>,
+    context: Option<String>,
+    docs: Option<String>
+) -> Vec<MarkedString> {
     let mut tooltip = vec![];
-    tooltip.push(MarkedString::from_language_code("rust".into(), the_type));
+    let rust = "rust".to_string();
+    if !the_type.trim().is_empty() {
+        tooltip.push(MarkedString::from_language_code(rust.clone(), the_type));
+    }
     if let Some(doc_url) = doc_url {
         tooltip.push(MarkedString::from_markdown(doc_url));
     }
-    if !docs.is_empty() {
+    if let Some(context) = context {
+        tooltip.push(MarkedString::from_language_code(rust.clone(), context));
+    }
+    if let Some(docs) = docs {
         tooltip.push(MarkedString::from_markdown(docs));
     }
-    
     tooltip
 }
 
-/// Extracts documentation and the context string information using racer.
-fn racer(vfs: Arc<Vfs>, fmt_config: FmtConfig, span: &Span<ZeroIndexed>, def: Option<&Def>) -> Option<(String, Option<String>)> {
+struct RacerDef {
+    decl_or_context: Option<String>,
+    docs: Option<String>,
+}
+
+/// Extracts the documentation and type information using racer.
+/// 
+/// The type will be formatted according to the racer match and
+/// the documentation will be processed.
+fn racer(
+    vfs: Arc<Vfs>,
+    fmt_config: FmtConfig,
+    span: &Span<ZeroIndexed>,
+) -> Option<RacerDef> {
     let file_path = &span.file;
 
     if !file_path.as_path().exists() {
-        trace!("racer: skipping non-existant file: {:?}", file_path);
+        error!("racer: skipping non-existant file: {:?}", file_path);
         return None;
     }
 
-    let name = vfs.load_line(file_path.as_path(), span.range.row_start).ok().and_then(|line| {
-        let col_start = span.range.col_start.0 as usize;
-        let col_end = span.range.col_end.0 as usize;
-        line.get(col_start..col_end).map(|line| line.to_string())
-    });
+    let name = vfs.load_line(file_path.as_path(), span.range.row_start)
+        .ok()
+        .and_then(|line| {
+            let col_start = span.range.col_start.0 as usize;
+            let col_end = span.range.col_end.0 as usize;
+            line.get(col_start..col_end).map(|line| line.to_string())
+        });
 
     debug!("racer: name: {:?}", name);
     
@@ -338,15 +376,13 @@ fn racer(vfs: Arc<Vfs>, fmt_config: FmtConfig, span: &Span<ZeroIndexed>, def: Op
         trace!("racer: file_path: {:?}, location: {:?}", file_path, location);
         let matches = racer::complete_from_file(file_path, location, &session);
         matches
-            // Remove any matches that don't match the def or span name.
-            .filter(|m| {
-                def.map(|def| def.name == m.matchstr)
-                   .unwrap_or(name.as_ref().map(|name| name == &m.matchstr).unwrap_or(false))
+            .inspect(|m| {
+                trace!("racer: match: {:?}", m);
             })
-            // Avoid duplicate lines when the context string and the name are the same
-            .filter(|m| {
-                name.as_ref().map(|name| name != &m.contextstr).unwrap_or(true)
-            })
+            // Remove any matches that don't match the span
+            .filter(|m| name.as_ref().map(|name| name == &m.matchstr).unwrap_or(false))
+            // Avoid creating tooltip text that is exactly the item being hovered over
+            .filter(|m| name.as_ref().map(|name| name != &m.contextstr).unwrap_or(true))
             .map(|m| {
                 let mut ty = None;
                 trace!("racer: contextstr: {:?}", m.contextstr);
@@ -357,24 +393,22 @@ fn racer(vfs: Arc<Vfs>, fmt_config: FmtConfig, span: &Span<ZeroIndexed>, def: Op
                     },
                     racer::MatchType::Function => {
                         let the_type = format_method(&fmt_config, contextstr.into());
-                        if !the_type.is_empty() {
-                            ty = Some(the_type.into())
-                        }
+                        ty = empty_to_none(the_type.trim().into());
                     },
                     racer::MatchType::Trait | racer::MatchType::Enum | racer::MatchType::Struct => {
                         let the_type = format_object(&fmt_config, contextstr.into());
-                        if !the_type.is_empty() {
-                            ty = Some(the_type.into())
-                        }
+                        ty = empty_to_none(the_type.trim().into());
                     },
                     _ => {
-                        if !contextstr.trim().is_empty() {
-                            ty = Some(contextstr.into())
-                        }
+                        ty = empty_to_none(contextstr.trim().into());
                     }
                 }
-                trace!("racer: racer_ty: {:?}", ty);
-                (m.docs, ty)
+                let docs = empty_to_none(process_docs(&m.docs.trim()));
+                debug!("racer: decl_or_context: {:?}, docs.is_some: {}", ty, docs.is_some());
+                RacerDef {
+                    decl_or_context: ty,
+                    docs: docs,
+                }
             })
             .next()
     });
@@ -501,13 +535,14 @@ pub fn tooltip(
 
     let hover_file_path = parse_file_path!(&params.text_document.uri, "hover")?;
     let hover_span = ctx.convert_pos_to_span(hover_file_path, params.position);
-    let hover_span_ty = analysis.show_type(&hover_span).unwrap_or_else(|_| String::new());
+    let hover_span_typ = analysis.show_type(&hover_span).unwrap_or_else(|_| String::new());
     let hover_span_def = analysis.id(&hover_span).and_then(|id| analysis.get_def(id));
-    let hover_span_docs = analysis.docs(&hover_span).unwrap_or_else(|_| String::new());
+    let hover_span_doc = analysis.docs(&hover_span).unwrap_or_else(|_| String::new());
 
     trace!("tooltip: span: {:?}", hover_span);
     trace!("tooltip: span_def: {:?}", hover_span_def);
-    trace!("tooltip: span_ty: {:?}", hover_span_ty);
+    trace!("tooltip: span_typ: {:?}", hover_span_typ);
+    trace!("tooltip: span_doc: {:?}", hover_span_doc);
 
     let doc_url = analysis.doc_url(&hover_span).ok();
     
@@ -516,21 +551,19 @@ pub fn tooltip(
     let vfs = ctx.vfs.clone();
     let fmt_config = ctx.fmt_config();
 
-    let racer_fallback = |contents: &mut Vec<MarkedString>| {
-        if let Some((racer_docs, racer_ty)) = racer(vfs.clone(), ctx.fmt_config(), &hover_span, None) {
-            let docs = process_docs(&racer_docs);
-            let docs = if docs.trim().is_empty() { hover_span_docs } else { docs };
-            let ty = racer_ty.unwrap_or(hover_span_ty);
-            let ty = ty.trim();
-            if !ty.is_empty() {
-                contents.push(MarkedString::from_language_code("rust".into(), ty.into()));
-            }
-            if !docs.is_empty() {
-                contents.push(MarkedString::from_markdown(docs.into()));
-            }
+    let racer_tooltip = || {
+        if let Some(racer_def) = racer(vfs.clone(), ctx.fmt_config(), &hover_span) {
+            let docs = empty_to_none(racer_def.docs.unwrap_or(hover_span_doc));
+            let the_type = racer_def.decl_or_context.unwrap_or(hover_span_typ);
+            let context = None;
+            let doc_url = None;
+            create_toolip(the_type, doc_url, context, docs)
+        } else {
+            debug!("tooltip: racer returned: None");
+            vec![]
         }
     };
-    
+
     if let Ok(def) = hover_span_def {
         if def.kind == DefKind::Local && def.span == hover_span && def.qualname.contains("$") {
             debug!("tooltip: local variable declaration: {}", def.name);
@@ -546,32 +579,34 @@ pub fn tooltip(
             contents.push(MarkedString::from_language_code("rust".into(), def.value.trim().into()));
         } else { match def.kind {
             DefKind::TupleVariant | DefKind::StructVariant | DefKind::Field => {
-                debug!("tooltip: field or variant: {}", def.name);
                 contents.extend(tooltip_field_or_variant(&vfs, &def, doc_url));
             },
             DefKind::Enum | DefKind::Union | DefKind::Struct | DefKind::Trait => {
-                debug!("tooltip: struct, enum, union, or trait: {}", def.name);
                 contents.extend(tooltip_struct_enum_union_trait(&vfs, &fmt_config, &def, doc_url));
             },
             DefKind::Function | DefKind::Method => {
-                debug!("tooltip: function or method: {}", def.name);
                 contents.extend(tooltip_function_method(&vfs, &fmt_config, &def, doc_url));
             },
             DefKind::Mod => {
-                debug!("tooltip: mod usage: {}", def.name);
                 contents.extend(tooltip_mod(&vfs, &def, doc_url));
             },
             DefKind::Static | DefKind::Const => {
                 debug!("tooltip: static or const (using racer): {}", def.name);
-                racer_fallback(&mut contents);
+                contents.extend(racer_tooltip());
             },
             _ => {
-                debug!("tooltip: ignoring def = {:?}", def);
+                debug!("tooltip: ignoring def: \
+                        name: {:?}, \
+                        kind: {:?}, \
+                        value: {:?}, \
+                        qualname: {:?}, \
+                        parent: {:?}",
+                    def.name, def.kind, def.value, def.qualname, def.parent);
             }
         }}
     } else {
-        debug!("tooltip: def is empty; falling back to racer");
-        racer_fallback(&mut contents);
+        debug!("tooltip: def is empty (using racer)");
+        contents.extend(racer_tooltip());
     }
 
     Ok(contents)
