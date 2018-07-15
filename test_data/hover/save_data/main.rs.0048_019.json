@@ -8,7 +8,7 @@
     "Ok": [
       {
         "language": "rust",
-        "value": "pub struct Box<T: ?Sized>(_)"
+        "value": "pub struct Box<T: ?Sized>"
       },
       "A pointer type for heap allocation.\n\nSee the [module-level documentation](../../std/boxed/index.html) for more."
     ]

@@ -295,11 +295,7 @@ fn def_docs(def: &Def, vfs: &Vfs) -> Option<String> {
 
 /// Returns the type or function declaration from source. If source
 /// extraction fails, the result of `the_type` is used as a fallback.
-fn def_decl<F>(
-    def: &Def,
-    vfs: &Vfs,
-    the_type: F
-) -> String
+fn def_decl<F>(def: &Def, vfs: &Vfs, the_type: F) -> String
 where
     F: FnOnce() -> String
 {
@@ -465,16 +461,22 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
     let result = if formatted.trim().ends_with(";") {
         let mut decl = formatted.trim().trim_right_matches(";");
         if let (Some(pos), true) = (decl.rfind("("), decl.ends_with(")")) {
+            let mut hidden_count = 0;
             let tuple_parts = decl[pos+1..decl.len()-1].split(",").map(|part| {
                 let part = part.trim();
                 if decl.starts_with("pub") && !part.starts_with("pub") {
+                    hidden_count += 1;
                     "_".to_string()
                 } else {
                     part.to_string()
                 }
-            }).collect::<Vec<String>>().join(", ");
+            }).collect::<Vec<String>>();
             decl = &decl[0..pos];
-            format!("{}({})", decl, tuple_parts)
+            if hidden_count != tuple_parts.len() {
+                format!("{}({})", decl, tuple_parts.join(", "))
+            } else {
+                format!("{}", decl)
+            }
         } else {
             decl.into()
         }
@@ -740,7 +742,7 @@ fn test_format_object() {
 
     let input = "pub struct Box<T: ?Sized>(Unique<T>);";
     let result = format_object(config, input.into());
-    assert_eq!("pub struct Box<T: ?Sized>(_)", &result);
+    assert_eq!("pub struct Box<T: ?Sized>", &result);
 
     let input = "pub struct Thing(pub u32);";
     let result = format_object(config, input.into());
