@@ -1,13 +1,13 @@
-use span::{Span, ZeroIndexed, Row};
-use analysis::{Def, DefKind};
+use actions::requests::racer_coord;
 use actions::InitActionContext;
-use vfs::{self, Vfs};
+use analysis::{Def, DefKind};
+use config::FmtConfig;
 use lsp_data::*;
 use racer;
-use actions::requests::racer_coord;
-use server::ResponseError;
 use rustfmt::{self, Input as FmtInput};
-use config::FmtConfig;
+use server::ResponseError;
+use span::{Span, ZeroIndexed, Row};
+use vfs::{self, Vfs};
 
 use std::path::Path;
 use std::sync::Arc;
@@ -81,23 +81,25 @@ pub fn extract_docs(
         Row::new_zero_indexed(row_start.0)
     };
     let mut in_meta = false;
+    let mut hit_top = false;
     loop {
         let line = vfs.load_line(file, row)?;
+
         let next_row = if up { 
             Row::new_zero_indexed(row.0.saturating_sub(1)) 
         } else {
             Row::new_zero_indexed(row.0.saturating_add(1))
         };
+
         if row == next_row {
-            warn!("extract_docs: bailing out: prev_row == next_row; next_row = {:?}", next_row);
-            break;
+            hit_top = true;
         } else {
             row = next_row;
         }
 
         let line = line.trim();
 
-        if line.starts_with("#[") && line.ends_with("]") {
+        if line.starts_with("#[") && line.ends_with("]") && !hit_top {
             // Ignore single line attributes
             continue;
         } 
@@ -106,15 +108,19 @@ pub fn extract_docs(
         // multi-line attribute
         if line.starts_with("#[") {
             in_meta = !in_meta;
-            if !in_meta { continue };
+            if !in_meta && !hit_top { continue };
         } else if line.ends_with("]") && !line.starts_with("//") {
             in_meta = !in_meta;
-            if !in_meta { continue };
+            if !in_meta && !hit_top { continue };
         }
         
         if in_meta {
             // Ignore milti-line attributes
             continue;
+        } else if line.starts_with("////") {
+            // Break if we reach a comment header block (which is frequent
+            // in the standard library)
+            break;
         } else if line.starts_with("///") && !up {
             // Prevent loading non-mod docs for modules
             break;
@@ -133,6 +139,11 @@ pub fn extract_docs(
             } else {
                 docs.push(doc_line);
             }
+        } else if hit_top {
+            // The top of the file was reached
+            debug!("extract_docs: bailing out: prev_row == next_row; next_row = {:?}, up = {}", 
+                next_row, up);
+            break;
         } else if line.starts_with("//") {
             // Ignore non-doc comments, but continue scanning. This is
             // required to skip copyright notices at the start of modules.
@@ -140,10 +151,6 @@ pub fn extract_docs(
         } else if line.is_empty() {
             // Ignore gaps
             continue;
-        } else if line.starts_with("////") {
-            // Break if we reach a comment header block (which is frequent
-            // in the standard library)
-            break;
         } else {
             // Otherwise, we've reached the end of the docs
             break;
@@ -153,7 +160,11 @@ pub fn extract_docs(
     Ok(docs)
 }
 
-fn extract_and_process_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndexed>) -> Option<String> {
+fn extract_and_process_docs(
+    vfs: &Vfs, 
+    file: &Path, 
+    row_start: Row<ZeroIndexed>
+) -> Option<String> {
     extract_docs(vfs, file, row_start)
         .map_err(|e| {
             error!("failed to extract docs: row: {:?}, file: {:?} ({:?})", row_start, file, e);
@@ -164,8 +175,13 @@ fn extract_and_process_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndexed>)
         .and_then(|docs| empty_to_none(docs))
 }
 
-/// Extracts a function, method, struct, enum, or trait decleration from source.
-pub fn extract_decl(vfs: &Vfs, file: &Path, mut row: Row<ZeroIndexed>) -> Result<Vec<String>, vfs::Error> {
+/// Extracts a function, method, struct, enum, or trait decleration
+/// from source.
+pub fn extract_decl(
+    vfs: &Vfs, 
+    file: &Path, 
+    mut row: Row<ZeroIndexed>
+) -> Result<Vec<String>, vfs::Error> {
     debug!("extract_decl: row_start: {:?}, file: {:?}", row, file);
     let mut lines = Vec::new();
     loop {
@@ -217,7 +233,11 @@ fn tooltip_local_variable_usage(vfs: &Vfs, def: &Def) -> Vec<MarkedString> {
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_field_or_variant(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_field_or_variant(
+    vfs: &Vfs, 
+    def: &Def, 
+    doc_url: Option<String>
+) -> Vec<MarkedString> {
     debug!("tooltip_field_or_variant: {}", def.name);
 
     let the_type = def.value.trim().into();
@@ -227,7 +247,12 @@ fn tooltip_field_or_variant(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Ve
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_struct_enum_union_trait(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_struct_enum_union_trait(
+    vfs: &Vfs, 
+    fmt_config: &FmtConfig, 
+    def: &Def, 
+    doc_url: Option<String>
+) -> Vec<MarkedString> {
     debug!("tooltip_struct_enum_union_trait: {}", def.name);
 
     // fallback in case source extration fails
@@ -261,7 +286,11 @@ fn tooltip_mod(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedStrin
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_function_method(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_function_method(
+    vfs: &Vfs, 
+    fmt_config: &FmtConfig, 
+    def: &Def, doc_url: Option<String>
+) -> Vec<MarkedString> {
     debug!("tooltip_function_method: {}", def.name);
 
     let the_type = || def.value.trim()
@@ -277,7 +306,11 @@ fn tooltip_function_method(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_local_variable_decl(_vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_local_variable_decl(
+    _vfs: &Vfs, 
+    def: &Def, 
+    doc_url: Option<String>
+) -> Vec<MarkedString> {
     debug!("tooltip_local_variable_decl: {}", def.name);
 
     let the_type = def.value.trim().into();
@@ -287,7 +320,11 @@ fn tooltip_local_variable_decl(_vfs: &Vfs, def: &Def, doc_url: Option<String>) -
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_function_arg_usage(_vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_function_arg_usage(
+    _vfs: &Vfs, 
+    def: &Def, 
+    doc_url: Option<String>
+) -> Vec<MarkedString> {
     debug!("tooltip_function_arg_usage: {}", def.name);
 
     let the_type = def.value.trim().into();
@@ -297,7 +334,11 @@ fn tooltip_function_arg_usage(_vfs: &Vfs, def: &Def, doc_url: Option<String>) ->
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_function_signature_arg(_vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_function_signature_arg(
+    _vfs: &Vfs, 
+    def: &Def, 
+    doc_url: Option<String>
+) -> Vec<MarkedString> {
     debug!("tooltip_function_signature_arg: {}", def.name);
 
     let the_type = def.value.trim().into();
@@ -307,7 +348,10 @@ fn tooltip_function_signature_arg(_vfs: &Vfs, def: &Def, doc_url: Option<String>
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_static_const_decl(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_static_const_decl(
+    vfs: &Vfs, 
+    def: &Def, doc_url: Option<String>
+) -> Vec<MarkedString> {
     debug!("tooltip_static_const_decl: {}", def.name);
 
     let the_type = def.value.trim().into();
@@ -381,11 +425,7 @@ struct RacerDef {
 /// 
 /// The type will be formatted according to the racer match and
 /// the documentation will be processed.
-fn racer(
-    vfs: Arc<Vfs>,
-    fmt_config: FmtConfig,
-    span: &Span<ZeroIndexed>,
-) -> Option<RacerDef> {
+fn racer(vfs: Arc<Vfs>, fmt_config: FmtConfig, span: &Span<ZeroIndexed>) -> Option<RacerDef> {
     let file_path = &span.file;
 
     if !file_path.as_path().exists() {
@@ -422,15 +462,16 @@ fn racer(
             .map(|m| {
                 let mut ty = None;
                 let contextstr = m.contextstr.trim_right_matches("{").trim();
+                use racer::MatchType::{Module, Function, Trait, Enum, Struct};
                 match m.mtype {
-                    racer::MatchType::Module => {
+                    Module => {
                         // Ignore
                     },
-                    racer::MatchType::Function => {
+                    Function => {
                         let the_type = format_method(&fmt_config, contextstr.into());
                         ty = empty_to_none(the_type.trim().into());
                     },
-                    racer::MatchType::Trait | racer::MatchType::Enum | racer::MatchType::Struct => {
+                    Trait | Enum | Struct => {
                         let the_type = format_object(&fmt_config, contextstr.into());
                         ty = empty_to_none(the_type.trim().into());
                     },
@@ -477,7 +518,8 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
     };
 
     let mut out = Vec::<u8>::with_capacity(the_type.len());
-    let formatted = match rustfmt::format_input(FmtInput::Text(object), &config, Some(&mut out)) {
+    let input = FmtInput::Text(object);
+    let formatted = match rustfmt::format_input(input, &config, Some(&mut out)) {
         Ok(_) => {
             let utf8 = String::from_utf8(out);
             match utf8.map(|lines| (lines.rfind("{"), lines)) {
@@ -496,7 +538,8 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
         }
     };
 
-    // If it's a tuple, remove the trailing ';' and hide non-pub components for pub types
+    // If it's a tuple, remove the trailing ';' and hide non-pub components
+    // for pub types
     let result = if formatted.trim().ends_with(";") {
         let mut decl = formatted.trim().trim_right_matches(";");
         if let (Some(pos), true) = (decl.rfind("("), decl.ends_with(")")) {
@@ -539,7 +582,8 @@ fn format_method(fmt_config: &FmtConfig, the_type: String) -> String {
     let config = fmt_config.get_rustfmt_config();
     let method = format!("impl Dummy {{ {} {{ unimplmented!() }} }}", the_type);
     let mut out = Vec::<u8>::with_capacity(the_type.len());
-    let result = match rustfmt::format_input(FmtInput::Text(method), config, Some(&mut out)) {
+    let input = FmtInput::Text(method);
+    let result = match rustfmt::format_input(input, config, Some(&mut out)) {
         Ok(_) => {
             if let Ok(mut lines) = String::from_utf8(out) {
                 if let Some(front_pos) = lines.find("{") {
@@ -591,8 +635,6 @@ pub fn tooltip(
     trace!("tooltip: span_doc: {:?}", hover_span_doc);
 
     let doc_url = analysis.doc_url(&hover_span).ok();
-    
-    let mut contents = vec![];
 
     let vfs = ctx.vfs.clone();
     let fmt_config = ctx.fmt_config();
@@ -606,39 +648,41 @@ pub fn tooltip(
             create_tooltip(the_type, doc_url, context, docs)
         } else {
             debug!("tooltip: racer returned: None");
-            vec![]
+            Vec::default()
         }
     };
 
-    if let Ok(def) = hover_span_def {
+    let contents = if let Ok(def) = hover_span_def {
         if def.kind == DefKind::Local && def.span == hover_span && def.qualname.contains("$") {
-            contents = tooltip_local_variable_decl(&vfs, &def, doc_url);
+            tooltip_local_variable_decl(&vfs, &def, doc_url)
         } else if def.kind == DefKind::Local && def.span != hover_span && !def.qualname.contains("$") {
-            contents = tooltip_function_arg_usage(&vfs, &def, doc_url);
+            tooltip_function_arg_usage(&vfs, &def, doc_url)
         } else if def.kind == DefKind::Local && def.span != hover_span && def.qualname.contains("$") {
-            contents = tooltip_local_variable_usage(&vfs, &def);
+            tooltip_local_variable_usage(&vfs, &def)
         } else if def.kind == DefKind::Local && def.span == hover_span {
-            contents = tooltip_function_signature_arg(&vfs, &def, doc_url);
+            tooltip_function_signature_arg(&vfs, &def, doc_url)
         } else {
             match def.kind {
                 DefKind::TupleVariant | DefKind::StructVariant | DefKind::Field => {
-                    contents = tooltip_field_or_variant(&vfs, &def, doc_url);
+                    tooltip_field_or_variant(&vfs, &def, doc_url)
                 },
                 DefKind::Enum | DefKind::Union | DefKind::Struct | DefKind::Trait => {
-                    contents = tooltip_struct_enum_union_trait(&vfs, &fmt_config, &def, doc_url);
+                    tooltip_struct_enum_union_trait(&vfs, &fmt_config, &def, doc_url)
                 },
                 DefKind::Function | DefKind::Method => {
-                    contents = tooltip_function_method(&vfs, &fmt_config, &def, doc_url);
+                    tooltip_function_method(&vfs, &fmt_config, &def, doc_url)
                 },
                 DefKind::Mod => {
-                    contents = tooltip_mod(&vfs, &def, doc_url);
+                    tooltip_mod(&vfs, &def, doc_url)
                 },
                 DefKind::Static | DefKind::Const => {
                     // racer generally provides more content here
                     debug!("tooltip: static or const (attempting racer first): {}", def.name);
-                    contents = racer_tooltip();
-                    if contents.is_empty() {
-                        contents = tooltip_static_const_decl(&vfs, &def, doc_url);
+                    let contents = racer_tooltip();
+                    if !contents.is_empty() {
+                        contents
+                    } else {
+                        tooltip_static_const_decl(&vfs, &def, doc_url)
                     }
                 },
                 _ => {
@@ -649,366 +693,31 @@ pub fn tooltip(
                             qualname: {:?}, \
                             parent: {:?}",
                         def.name, def.kind, def.value, def.qualname, def.parent);
+
+                    Vec::default()
                 }
             }
         }
     } else {
         debug!("tooltip: def is empty (using racer)");
-        contents = racer_tooltip();
-    }
+        racer_tooltip()
+    };
 
     Ok(contents)
-}
-
-#[test]
-fn test_process_docs_rust_blocks() {
-    let docs = "
-Brief one liner.
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Phasellus vitae ex
-vel mi egestas semper in non dolor. Proin ut arcu at odio hendrerit consequat.
-
-# Examples
-
-Donec ullamcorper risus quis massa sollicitudin, id faucibus nibh bibendum.
-
-## Hidden code lines and proceeding whitespace is removed and meta attributes are preserved
-
-```
-# extern crate foo;
-
-use foo::bar;
-
-#[derive(Debug)]
-struct Baz(u32);
-
-let baz = Baz(1);
-```
-
-## Rust code block attributes are converted to 'rust'
-
-```compile_fail,E0123
-let foo = ;
-```
-
-## Inner comments and indentation is preserved
-
-```
-/// inner doc comment
-fn foobar() {
-    // inner comment
-    let indent = 1;
-}
-```
-    ".trim();
-
-    let expected = "
-Brief one liner.
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Phasellus vitae ex
-vel mi egestas semper in non dolor. Proin ut arcu at odio hendrerit consequat.
-
-# Examples
-
-Donec ullamcorper risus quis massa sollicitudin, id faucibus nibh bibendum.
-
-## Hidden code lines and proceeding whitespace is removed and meta attributes are preserved
-
-```rust
-use foo::bar;
-
-#[derive(Debug)]
-struct Baz(u32);
-
-let baz = Baz(1);
-```
-
-## Rust code block attributes are converted to 'rust'
-
-```rust
-let foo = ;
-```
-
-## Inner comments and indentation is preserved
-
-```rust
-/// inner doc comment
-fn foobar() {
-    // inner comment
-    let indent = 1;
-}
-```
-    ".trim();
-
-    let actual = process_docs(docs);
-    assert_eq!(expected, actual);
-}
-
-#[test]
-fn test_process_docs_bash_block() {
-    let expected = "
-Brief one liner.
-
-```bash
-# non rust-block comment lines are preserved
-ls -la
-```
-    ".trim();
-
-    let actual = process_docs(expected);
-    assert_eq!(expected, actual);
-}
-
-#[test]
-fn test_process_docs_racer_noise() {
-    let docs = "
-////////////////////////////////////////////////////////////////////////////////
-
-Spawns a new thread, returning a [`JoinHandle`] for it.
-
-The join handle will implicitly *detach* the child thread upon being
-dropped. In this case, the child thread may outlive the parent (unless
-   ".trim();
-
-    let expected = "
-Spawns a new thread, returning a [`JoinHandle`] for it.
-
-The join handle will implicitly *detach* the child thread upon being
-dropped. In this case, the child thread may outlive the parent (unless
-    ".trim();
-
-    let actual = process_docs(docs);
-    assert_eq!(expected, actual);
-}
-
-#[test]
-fn test_format_object() {
-
-    let config = &FmtConfig::default();
-
-    let input = "pub struct Box<T: ?Sized>(Unique<T>);";
-    let result = format_object(config, input.into());
-    assert_eq!("pub struct Box<T: ?Sized>", &result);
-
-    let input = "pub struct Thing(pub u32);";
-    let result = format_object(config, input.into());
-    assert_eq!("pub struct Thing(pub u32)", &result, "tuple struct with trailing ';' from racer");
-
-    let input = "pub struct Thing(pub u32)";
-    let result = format_object(config, input.into());
-    assert_eq!("pub struct Thing(pub u32)", &result, "pub tuple struct");
-
-    let input = "pub struct Thing(pub u32, i32)";
-    let result = format_object(config, input.into());
-    assert_eq!("pub struct Thing(pub u32, _)", &result, "non-pub components of pub tuples should be hidden");
-
-    let input = "struct Thing(u32, i32)";
-    let result = format_object(config, input.into());
-    assert_eq!("struct Thing(u32, i32)", &result, "private tuple struct may show private components");
-
-    let input = "pub struct Thing<T: Copy>";
-    let result = format_object(config, input.into());
-    assert_eq!("pub struct Thing<T: Copy>", &result, "pub struct");
-
-    let input = "pub struct Thing<T: Copy> {";
-    let result = format_object(config, input.into());
-    assert_eq!("pub struct Thing<T: Copy>", &result, "pub struct with trailing '{{' from racer");
-
-    let input = "pub struct Thing { x: i32 }";
-    let result = format_object(config, input.into());
-    assert_eq!("pub struct Thing", &result, "pub struct with body");
-
-    let input = "pub enum Foobar { Foo, Bar }";
-    let result = format_object(config, input.into());
-    assert_eq!("pub enum Foobar", &result, "pub enum with body");
-
-    let input = "pub trait Thing<T, U> where T: Copy + Sized, U: Clone";
-    let expected = "
-pub trait Thing<T, U>
-where
-    T: Copy + Sized,
-    U: Clone,
-    ".trim();
-    let result = format_object(config, input.into());
-    assert_eq!(expected, &result, "trait with where clause");
-}
-
-
-#[test]
-fn test_format_method() {
-
-    let config = &FmtConfig::default();
-
-    let input = "fn foo() -> ()";
-    let result = format_method(config, input.into());
-    assert_eq!(input, &result, "function explicit void return");
-
-    let input = "fn foo()";
-    let expected = "fn foo()";
-    let result = format_method(config, input.into());
-    assert_eq!(expected, &result, "function");
-
-    let input = "fn foo() -> Thing";
-    let expected = "fn foo() -> Thing";
-    let result = format_method(config, input.into());
-    assert_eq!(expected, &result, "function with return");
-
-    let input = "fn foo(&self);";
-    let expected = "fn foo(&self)";
-    let result = format_method(config, input.into());
-    assert_eq!(expected, &result, "method");
-
-    let input = "fn foo<T>(t: T) where T: Copy";
-    let expected = "
-fn foo<T>(t: T)
-where
-    T: Copy,
-    ".trim();
-    let result = format_method(config, input.into());
-    assert_eq!(expected, &result, "function with generic parameters");
-
-    let input = "fn foo<T>(&self, t: T) where T: Copy";
-    let expected = "
-fn foo<T>(&self, t: T)
-where
-    T: Copy,
-    ".trim();
-    let result = format_method(config, input.into());
-    assert_eq!(expected, &result, "method with type parameters");
-
-    let input = "   fn foo<T>(
-         &self, 
- t: T) 
-      where 
-T: Copy
-
-";
-    let expected = "
-fn foo<T>(&self, t: T)
-where
-    T: Copy,
-    ".trim();
-    let result = format_method(config, input.into());
-    assert_eq!(expected, &result, "method with type parameters; corrected spacing");
-
-    let input = "fn really_really_really_really_long_name<T>(foo_thing: String, bar_thing: Thing, baz_thing: Vec<T>, foo_other: u32, bar_other: i32) -> Thing";
-    let expected = "
-fn really_really_really_really_long_name<T>(
-    foo_thing: String,
-    bar_thing: Thing,
-    baz_thing: Vec<T>,
-    foo_other: u32,
-    bar_other: i32,
-) -> Thing
-    ".trim();
-    let result = format_method(config, input.into());
-    assert_eq!(expected, &result, "long function signature");
-
-    let input = "fn really_really_really_really_long_name(&self, foo_thing: String, bar_thing: Thing, baz_thing: Vec<T>, foo_other: u32, bar_other: i32) -> Thing";
-    let expected = "
-fn really_really_really_really_long_name(
-    &self,
-    foo_thing: String,
-    bar_thing: Thing,
-    baz_thing: Vec<T>,
-    foo_other: u32,
-    bar_other: i32,
-) -> Thing
-    ".trim();
-    let result = format_method(config, input.into());
-    assert_eq!(expected, &result, "long method signature with unspecified generic");
-}
-
-#[test]
-fn test_extract_and_process_docs_module() {
-    let expected = "
-Sample module
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas
-tincidunt tristique maximus. Sed venenatis urna vel sagittis tempus.
-In hac habitasse platea dictumst.
-
-# Examples
-
-```rust
-let foo = sample::foo();
-```
-    ".trim();
-
-    let vfs = Vfs::new();
-    let file = Path::new("test_data/hover/src/sample.rs");
-    let row_start = Row::new_zero_indexed(0);
-    let actual = extract_and_process_docs(&vfs, file, row_start).expect("module docs");
-    assert_eq!(expected, actual, "hover/sample.rs module docs");
-}
-
-#[test]
-fn test_extract_and_process_docs() {
-    let expected = "
-The `Baz` variant
-
-Aliquam erat volutpat.
-    ".trim();
-
-    let vfs = Vfs::new();
-    let file = Path::new("test_data/hover/src/sample.rs");
-    let row_start = Row::new_zero_indexed(61);
-    let actual = extract_and_process_docs(&vfs, file, row_start).expect("module docs");
-    assert_eq!(expected, actual, "hover/sample.rs module docs");
-}
-
-#[test]
-fn test_extract_decl() {
-    let vfs = Vfs::new();
-    let file = Path::new("test_data/hover/src/sample.rs");
-
-    let expected = "
-pub trait Qeh<T, U>
-where T: Copy,
-U: Clone
-    ".trim();
-    let row_start = Row::new_zero_indexed(112);
-    let actual = extract_decl(&vfs, file, row_start).expect("trait decleration").join("\n");
-    assert_eq!(expected, actual);
-
-    let expected = "
-pub fn multiple_lines(
-s: String,
-i: i32
-)
-    ".trim();
-    let row_start = Row::new_zero_indexed(118);
-    let actual = extract_decl(&vfs, file, row_start).expect("function decleration").join("\n");
-    assert_eq!(expected, actual);
-
-    let expected = "fn make_copy(&self) -> Self";
-    let row_start = Row::new_zero_indexed(102);
-    let actual = extract_decl(&vfs, file, row_start).expect("method decleration").join("\n");
-    assert_eq!(expected, actual);
-
-    let expected = "pub struct NewType(pub u32, f32)";
-    let row_start = Row::new_zero_indexed(70);
-    let actual = extract_decl(&vfs, file, row_start).expect("tuple decleration").join("\n");
-    assert_eq!(expected, actual);
-
-    let expected = "pub struct Foo<T>";
-    let row_start = Row::new_zero_indexed(45);
-    let actual = extract_decl(&vfs, file, row_start).expect("struct decleration").join("\n");
-    assert_eq!(expected, actual);
 }
 
 #[cfg(test)]
 pub mod test {
     use super::*;
 
-    use config;
     use analysis;
+    use build::BuildPriority;
+    use config;
     use lsp_data::{ClientCapabilities, InitializationOptions};
     use ls_types::{TextDocumentPositionParams, TextDocumentIdentifier, Position};
+    use serde_json as json;
     use server::{Output, RequestId};
     use url::Url;
-    use serde_json as json;
-    use build::BuildPriority;
     
     use std::fs;
     use std::path::PathBuf;
@@ -1279,93 +988,749 @@ pub mod test {
             Ok(failures)
         }
     }
-}
 
-#[test]
-fn test_tooltip() -> Result<(), Box<::std::error::Error>> {
-    use self::test::{TooltipTestHarness, LineOutput, Test};
-    use std::env;
+    /// Strips indentation from string literals by examining
+    /// the indent of the first non-empty line. Preceeding
+    /// and trailing whitespace is also removed.
+    fn noindent(text: &str) -> String {
+        let indent = text
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .peekable()
+            .peek()
+            .map(|first_non_empty_line| {
+                first_non_empty_line
+                    .chars()
+                    .scan(0, |_, ch| {
+                        if ch.is_whitespace() {
+                            Some(1)
+                        } else {
+                            None
+                        }
+                    })
+                    .fuse()
+                    .fold(0, |a, b| a + b)
+            })
+            .unwrap_or(0);
 
-    let tests = vec![
-        Test::new("main.rs", 12, 12),
-        Test::new("main.rs", 14, 9),
-        Test::new("main.rs", 14, 15),
-        Test::new("main.rs", 15, 15),
-        Test::new("main.rs", 16, 15),
-        Test::new("main.rs", 17, 15),
-        Test::new("main.rs", 30, 12),
-        Test::new("main.rs", 30, 22),
-        Test::new("main.rs", 30, 27),
-        Test::new("main.rs", 31, 7),
-        Test::new("main.rs", 31, 12),
-        Test::new("main.rs", 33, 10),
-        Test::new("main.rs", 33, 16),
-        Test::new("main.rs", 33, 22),
-        Test::new("main.rs", 34, 12),
-        Test::new("main.rs", 38, 14),
-        Test::new("main.rs", 38, 24),
-        Test::new("main.rs", 38, 31),
-        Test::new("main.rs", 38, 35),
-        Test::new("main.rs", 38, 42),
-        Test::new("main.rs", 38, 48),
-        Test::new("main.rs", 39, 12),
-        Test::new("main.rs", 43, 11),
-        Test::new("main.rs", 43, 18),
-        Test::new("main.rs", 43, 25),
-        Test::new("main.rs", 44, 12),
-        Test::new("main.rs", 44, 21),
-        Test::new("main.rs", 44, 28),
-        Test::new("main.rs", 45, 22),
-        Test::new("main.rs", 46, 21),
-        Test::new("main.rs", 46, 28),
-        Test::new("main.rs", 47, 13),
-        Test::new("main.rs", 47, 22),
-        Test::new("main.rs", 47, 28),
-        Test::new("main.rs", 47, 40),
-        Test::new("main.rs", 47, 50),
-        Test::new("main.rs", 48, 19),
-        Test::new("main.rs", 51, 13),
-        Test::new("main.rs", 51, 20),
-        Test::new("main.rs", 56, 12),
-        Test::new("main.rs", 56, 26),
+        text
+            .lines()
+            .map(|line| line.chars().skip(indent).collect::<String>())
+            .collect::<Vec<String>>()
+            .join("\n")
+            .trim()
+            .to_string()
+    }
 
-        Test::new("sample.rs", 25, 12),
-        Test::new("sample.rs", 25, 17),
-        Test::new("sample.rs", 46, 14),
-        Test::new("sample.rs", 50, 10),
-        Test::new("sample.rs", 62, 6),
-        Test::new("sample.rs", 81, 14),
-        Test::new("sample.rs", 81, 24),
-        Test::new("sample.rs", 88, 14),
-        Test::new("sample.rs", 88, 70),
-        Test::new("sample.rs", 89, 43),
-        Test::new("sample.rs", 90, 53),
-        Test::new("sample.rs", 99, 12),
-        Test::new("sample.rs", 103, 13),
-        Test::new("sample.rs", 107, 13),
-        Test::new("sample.rs", 119, 14),
-        Test::new("sample.rs", 128, 11),
-        Test::new("sample.rs", 131, 14),
-        Test::new("sample.rs", 131, 26),
-    ];
+    #[test]
+    fn test_noindent() {
+        let lines = noindent("
 
-    let cwd = env::current_dir()?;
-    let out = LineOutput::default();
-    let proj_dir = cwd.join("test_data").join("hover");
-    let save_dir = cwd.join("target").join("hover").join("save_data");
-    let load_dir = proj_dir.join("save_data");
-    
-    let harness = TooltipTestHarness::new(proj_dir, &out);
+            Hello, world ! ! !
+            The next line
+                Indented line
+            Last line
 
-    out.reset();
+        ");
+        assert_eq!("Hello, world ! ! !\nThe next line\n    Indented line\nLast line", &lines);
 
-    let failures = harness.run_tests(&tests, load_dir, save_dir)?;
+        let lines = noindent("
+        
+                Hello, world ! ! !
+                The next line
+                    Indented line
+                Last line
 
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        eprintln!("{}\n\n", out.reset().join("\n"));
-        eprintln!("{:#?}\n\n", failures);
-        Err(format!("{} of {} tooltip tests failed", failures.len(), tests.len()).into())
+        ");
+        assert_eq!("Hello, world ! ! !\nThe next line\n    Indented line\nLast line", &lines);
+    }
+
+
+    #[test]
+    fn test_process_docs_rust_blocks() {
+        let docs = &noindent("
+            Brief one liner.
+
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Phasellus vitae ex
+            vel mi egestas semper in non dolor. Proin ut arcu at odio hendrerit consequat.
+
+            # Examples
+
+            Donec ullamcorper risus quis massa sollicitudin, id faucibus nibh bibendum.
+
+            ## Hidden code lines and proceeding whitespace is removed and meta attributes are preserved
+
+            ```
+            # extern crate foo;
+
+            use foo::bar;
+
+            #[derive(Debug)]
+            struct Baz(u32);
+
+            let baz = Baz(1);
+            ```
+
+            ## Rust code block attributes are converted to 'rust'
+
+            ```compile_fail,E0123
+            let foo = \"compile_fail\"
+            ```
+
+            ```no_run
+            let foo = \"no_run\";
+            ```
+
+            ```ignore
+            let foo = \"ignore\";
+            ```
+
+            ```should_panic
+            let foo = \"should_panic\";
+            ```
+
+            ```should_panic,ignore,no_run,compile_fail
+            let foo = \"should_panic,ignore,no_run,compile_fail\";
+            ```
+
+            ## Inner comments and indentation is preserved
+
+            ```
+            /// inner doc comment
+            fn foobar() {
+                // inner comment
+                let indent = 1;
+            }
+            ```
+        ");
+
+        let expected = noindent("
+            Brief one liner.
+
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Phasellus vitae ex
+            vel mi egestas semper in non dolor. Proin ut arcu at odio hendrerit consequat.
+
+            # Examples
+
+            Donec ullamcorper risus quis massa sollicitudin, id faucibus nibh bibendum.
+
+            ## Hidden code lines and proceeding whitespace is removed and meta attributes are preserved
+
+            ```rust
+            use foo::bar;
+
+            #[derive(Debug)]
+            struct Baz(u32);
+
+            let baz = Baz(1);
+            ```
+
+            ## Rust code block attributes are converted to 'rust'
+
+            ```rust
+            let foo = \"compile_fail\"
+            ```
+
+            ```rust
+            let foo = \"no_run\";
+            ```
+
+            ```rust
+            let foo = \"ignore\";
+            ```
+
+            ```rust
+            let foo = \"should_panic\";
+            ```
+
+            ```rust
+            let foo = \"should_panic,ignore,no_run,compile_fail\";
+            ```
+
+            ## Inner comments and indentation is preserved
+
+            ```rust
+            /// inner doc comment
+            fn foobar() {
+                // inner comment
+                let indent = 1;
+            }
+            ```
+        ");
+
+        let actual = process_docs(docs);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_process_docs_bash_block() {
+        let expected = noindent("
+            Brief one liner.
+
+            ```bash
+            # non rust-block comment lines are preserved
+            ls -la
+            ```
+        ");
+
+        let actual = process_docs(&expected);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_process_docs_racer_returns_extra_slashes() {
+        let docs = noindent("
+            ////////////////////////////////////////////////////////////////////////////////
+
+            Spawns a new thread, returning a [`JoinHandle`] for it.
+
+            The join handle will implicitly *detach* the child thread upon being
+            dropped. In this case, the child thread may outlive the parent (unless
+        ");
+
+        let expected = noindent("
+            Spawns a new thread, returning a [`JoinHandle`] for it.
+
+            The join handle will implicitly *detach* the child thread upon being
+            dropped. In this case, the child thread may outlive the parent (unless
+        ");
+
+        let actual = process_docs(&docs);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_format_method() {
+
+        let config = &FmtConfig::default();
+
+        let input = "fn foo() -> ()";
+        let result = format_method(config, input.into());
+        assert_eq!(input, &result, "function explicit void return");
+
+        let input = "fn foo()";
+        let expected = "fn foo()";
+        let result = format_method(config, input.into());
+        assert_eq!(expected, &result, "function");
+
+        let input = "fn foo() -> Thing";
+        let expected = "fn foo() -> Thing";
+        let result = format_method(config, input.into());
+        assert_eq!(expected, &result, "function with return");
+
+        let input = "fn foo(&self);";
+        let expected = "fn foo(&self)";
+        let result = format_method(config, input.into());
+        assert_eq!(expected, &result, "method");
+
+        let input = "fn foo<T>(t: T) where T: Copy";
+        let expected = noindent("
+            fn foo<T>(t: T)
+            where
+                T: Copy,
+        ");
+        let result = format_method(config, input.into());
+        assert_eq!(expected, result, "function with generic parameters");
+
+        let input = "fn foo<T>(&self, t: T) where T: Copy";
+        let expected = noindent("
+            fn foo<T>(&self, t: T)
+            where
+                T: Copy,
+        ");
+        let result = format_method(config, input.into());
+        assert_eq!(expected, result, "method with type parameters");
+
+        let input = noindent("   fn foo<T>(
+                    &self, 
+            t: T) 
+                where 
+            T: Copy
+
+        ");
+        let expected = noindent("
+            fn foo<T>(&self, t: T)
+            where
+                T: Copy,
+        ");
+        let result = format_method(config, input.into());
+        assert_eq!(expected, result, "method with type parameters; corrected spacing");
+
+        let input = "fn really_really_really_really_long_name<T>(foo_thing: String, bar_thing: Thing, baz_thing: Vec<T>, foo_other: u32, bar_other: i32) -> Thing";
+        let expected = noindent("
+            fn really_really_really_really_long_name<T>(
+                foo_thing: String,
+                bar_thing: Thing,
+                baz_thing: Vec<T>,
+                foo_other: u32,
+                bar_other: i32,
+            ) -> Thing
+        ");
+        let result = format_method(config, input.into());
+        assert_eq!(expected, result, "long function signature");
+
+        let input = "fn really_really_really_really_long_name(&self, foo_thing: String, bar_thing: Thing, baz_thing: Vec<T>, foo_other: u32, bar_other: i32) -> Thing";
+        let expected = noindent("
+            fn really_really_really_really_long_name(
+                &self,
+                foo_thing: String,
+                bar_thing: Thing,
+                baz_thing: Vec<T>,
+                foo_other: u32,
+                bar_other: i32,
+            ) -> Thing
+        ");
+        let result = format_method(config, input.into());
+        assert_eq!(expected, result, "long method signature with generic");
+    }
+
+    #[test]
+    fn test_extract_and_process_docs_module() {
+        let expected = noindent("
+            Sample module
+
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas
+            tincidunt tristique maximus. Sed venenatis urna vel sagittis tempus.
+            In hac habitasse platea dictumst.
+
+            # Examples
+
+            ```rust
+            let foo = sample::foo();
+            ```
+        ");
+
+        let vfs = Vfs::new();
+        let file = Path::new("test_data/hover/src/sample.rs");
+        let row_start = Row::new_zero_indexed(0);
+        let actual = extract_and_process_docs(&vfs, file, row_start).expect("module docs");
+        assert_eq!(expected, actual, "hover/sample.rs module docs");
+    }
+
+    #[test]
+    fn test_extract_and_process_docs() {
+        let expected = noindent("
+            The `Baz` variant
+
+            Aliquam erat volutpat.
+        ");
+
+        let vfs = Vfs::new();
+        let file = Path::new("test_data/hover/src/sample.rs");
+        let row_start = Row::new_zero_indexed(61);
+        let actual = extract_and_process_docs(&vfs, file, row_start).expect("module docs");
+        assert_eq!(expected, actual, "hover/sample.rs module docs");
+    }
+
+    #[test]
+    fn test_extract_decl() {
+        let vfs = Vfs::new();
+        let file = Path::new("test_data/hover/src/test_extract_decl.rs");
+
+        let expected = "pub fn foo() -> Foo<u32>";
+        let row_start = Row::new_zero_indexed(10);
+        let actual = extract_decl(&vfs, file, row_start)
+            .expect("fuction decleration")
+            .join("\n");
+        assert_eq!(expected, actual);
+
+        let expected = "pub struct Foo<T>";
+        let row_start = Row::new_zero_indexed(15);
+        let actual = extract_decl(&vfs, file, row_start)
+            .expect("struct decleration")
+            .join("\n");
+        assert_eq!(expected, actual);
+
+        let expected = "pub enum Bar";
+        let row_start = Row::new_zero_indexed(20);
+        let actual = extract_decl(&vfs, file, row_start)
+            .expect("enum decleration")
+            .join("\n");
+        assert_eq!(expected, actual);
+
+        let expected = "pub struct NewType(pub u32, f32)";
+        let row_start = Row::new_zero_indexed(25);
+        let actual = extract_decl(&vfs, file, row_start)
+            .expect("tuple decleration")
+            .join("\n");
+        assert_eq!(expected, actual);
+
+        let expected = "pub fn new() -> NewType";
+        let row_start = Row::new_zero_indexed(28);
+        let actual = extract_decl(&vfs, file, row_start)
+            .expect("struct function decleration")
+            .join("\n");
+        assert_eq!(expected, actual);
+
+        let expected = "pub fn bar<T: Copy + Add>(&self, the_really_long_name_string: String, the_really_long_name_foo: Foo<T>) -> Vec<(String, Foo<T>)>";
+        let row_start = Row::new_zero_indexed(32);
+        let actual = extract_decl(&vfs, file, row_start)
+            .expect("long struct method decleration with generics")
+            .join("\n");
+        assert_eq!(expected, actual);
+
+        let expected = "pub trait Baz<T> where T: Copy";
+        let row_start = Row::new_zero_indexed(37);
+        let actual = extract_decl(&vfs, file, row_start)
+            .expect("enum decleration")
+            .join("\n");
+        assert_eq!(expected, actual);
+
+        let expected = "fn make_copy(&self) -> Self";
+        let row_start = Row::new_zero_indexed(38);
+        let actual = extract_decl(&vfs, file, row_start)
+            .expect("trait method decleration")
+            .join("\n");
+        assert_eq!(expected, actual);
+
+        let expected = "fn make_copy(&self) -> Self";
+        let row_start = Row::new_zero_indexed(42);
+        let actual = extract_decl(&vfs, file, row_start)
+            .expect("trait method implementation")
+            .join("\n");
+        assert_eq!(expected, actual);
+
+        let expected = noindent("
+            pub trait Qeh<T, U>
+            where T: Copy,
+            U: Clone
+        ");
+        let row_start = Row::new_zero_indexed(47);
+        let actual = extract_decl(&vfs, file, row_start)
+            .expect("trait decleration multiline")
+            .join("\n");
+        assert_eq!(expected, actual);
+
+        let expected = noindent("
+            pub fn multiple_lines(
+            s: String,
+            i: i32
+            )
+        ");
+        let row_start = Row::new_zero_indexed(53);
+        let actual = extract_decl(&vfs, file, row_start)
+            .expect("function decleration multiline")
+            .join("\n");
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_format_object() {
+
+        let config = &FmtConfig::default();
+
+        let input = "pub struct Box<T: ?Sized>(Unique<T>);";
+        let result = format_object(config, input.into());
+        assert_eq!("pub struct Box<T: ?Sized>", &result, 
+            "tuple struct with all private fields has hidden components");
+
+        let input = "pub struct Thing(pub u32);";
+        let result = format_object(config, input.into());
+        assert_eq!("pub struct Thing(pub u32)", &result, 
+            "tuple struct with trailing ';' from racer");
+
+        let input = "pub struct Thing(pub u32)";
+        let result = format_object(config, input.into());
+        assert_eq!("pub struct Thing(pub u32)", &result, 
+            "pub tuple struct");
+
+        let input = "pub struct Thing(pub u32, i32)";
+        let result = format_object(config, input.into());
+        assert_eq!("pub struct Thing(pub u32, _)", &result, 
+            "non-pub components of pub tuples should be hidden");
+
+        let input = "struct Thing(u32, i32)";
+        let result = format_object(config, input.into());
+        assert_eq!("struct Thing(u32, i32)", &result, 
+            "private tuple struct may show private components");
+
+        let input = "pub struct Thing<T: Copy>";
+        let result = format_object(config, input.into());
+        assert_eq!("pub struct Thing<T: Copy>", &result, 
+            "pub struct");
+
+        let input = "pub struct Thing<T: Copy> {";
+        let result = format_object(config, input.into());
+        assert_eq!("pub struct Thing<T: Copy>", &result, 
+            "pub struct with trailing '{{' from racer");
+
+        let input = "pub struct Thing { x: i32 }";
+        let result = format_object(config, input.into());
+        assert_eq!("pub struct Thing", &result, 
+            "pub struct with body");
+
+        let input = "pub enum Foobar { Foo, Bar }";
+        let result = format_object(config, input.into());
+        assert_eq!("pub enum Foobar", &result, 
+            "pub enum with body");
+
+        let input = "pub trait Thing<T, U> where T: Copy + Sized, U: Clone";
+        let expected = noindent("
+            pub trait Thing<T, U>
+            where
+                T: Copy + Sized,
+                U: Clone,
+        ");
+        let result = format_object(config, input.into());
+        assert_eq!(expected, result, 
+            "trait with where clause");
+    }
+
+    #[test]
+    fn test_extract_docs_module_docs_no_copyright() {
+        let vfs = Vfs::new();
+        let file = Path::new("test_data/hover/src/test_extract_docs_module_docs_no_copyright.rs");
+        let row_start = Row::new_zero_indexed(0);
+        let actual = extract_docs(&vfs, &file, row_start)
+            .expect(&format!("failed to extract docs: {:?}", file))
+            .join("\n");
+
+        let expected = noindent("
+            Begin module docs
+
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas
+            tincidunt tristique maximus. Sed venenatis urna vel sagittis tempus.
+            In hac habitasse platea dictumst.
+
+            End module docs. 
+        ");
+
+        assert_eq!(expected, actual, "module docs without a copyright header");
+    }
+
+    #[test]
+    fn test_extract_docs_comment_block() {
+        let vfs = Vfs::new();
+        let file = Path::new("test_data/hover/src/test_extract_docs_comment_block.rs");
+        let row_start = Row::new_zero_indexed(21);
+        let actual = extract_docs(&vfs, &file, row_start)
+            .expect(&format!("failed to extract docs: {:?}", file))
+            .join("\n");
+
+        let expected = noindent("
+            The standard library often has comment header blocks that should not be
+            included.
+
+            Nam efficitur dapibus lectus consequat porta. Pellentesque augue metus,
+            vestibulum nec massa at, aliquet consequat ex.
+
+            End of spawn docs    
+        ");
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_extract_docs_empty_line_before_decl() {
+        let vfs = Vfs::new();
+        let file = Path::new("test_data/hover/src/test_extract_docs_empty_line_before_decl.rs");
+        let row_start = Row::new_zero_indexed(18);
+        let actual = extract_docs(&vfs, &file, row_start)
+            .expect(&format!("failed to extract docs: {:?}", file))
+            .join("\n");
+
+        let expected = noindent("
+            Begin empty before decl
+
+            Cras malesuada mattis massa quis ornare. Suspendisse in ex maximus,
+            iaculis ante non, ultricies nulla. Nam ultrices convallis ex, vel
+            lacinia est rhoncus sed. Nullam sollicitudin finibus ex at placerat.
+
+            End empty line before decl. 
+        ");
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_extract_docs_module_docs() {
+        let vfs = Vfs::new();
+        let file = Path::new("test_data/hover/src/test_extract_docs_module_docs.rs");
+
+        let row_start = Row::new_zero_indexed(0);
+        let actual = extract_docs(&vfs, &file, row_start)
+            .expect(&format!("failed to extract docs: {:?}", file))
+            .join("\n");
+
+        let expected = noindent("
+            Begin module docs
+
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas
+            tincidunt tristique maximus. Sed venenatis urna vel sagittis tempus.
+            In hac habitasse platea dictumst.
+
+            End module docs.
+        ");
+
+        assert_eq!(expected, actual);
+
+        let row_start = Row::new_zero_indexed(21);
+        let actual = extract_docs(&vfs, &file, row_start)
+            .expect(&format!("failed to extract docs: {:?}", file))
+            .join("\n");
+
+        let expected = noindent("
+            Begin first item docs
+
+            The first item docs should not pick up the module docs.
+        ");
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_extract_docs_attributes() {
+        let vfs = Vfs::new();
+        let file = Path::new("test_data/hover/src/test_extract_docs_attributes.rs");
+
+        let row_start = Row::new_zero_indexed(21);
+        let actual = extract_docs(&vfs, &file, row_start)
+            .expect(&format!("failed to extract docs: {:?}", file))
+            .join("\n");
+
+        let expected = noindent("
+            Begin multiline attribute
+
+            Cras malesuada mattis massa quis ornare. Suspendisse in ex maximus,
+            iaculis ante non, ultricies nulla. Nam ultrices convallis ex, vel
+            lacinia est rhoncus sed. Nullam sollicitudin finibus ex at placerat.
+
+            End multiline attribute
+        ");
+
+        assert_eq!(expected, actual);
+
+        let row_start = Row::new_zero_indexed(32);
+        let actual = extract_docs(&vfs, &file, row_start)
+            .expect(&format!("failed to extract docs: {:?}", file))
+            .join("\n");
+
+        let expected = noindent("
+            Begin single line attribute
+
+            Cras malesuada mattis massa quis ornare. Suspendisse in ex maximus,
+            iaculis ante non, ultricies nulla. Nam ultrices convallis ex, vel
+            lacinia est rhoncus sed. Nullam sollicitudin finibus ex at placerat.
+
+            End single line attribute.
+        ");
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_tooltip() -> Result<(), Box<::std::error::Error>> {
+        use self::test::{TooltipTestHarness, LineOutput, Test};
+        use std::env;
+
+        let tests = vec![
+            Test::new("main.rs", 12, 12),
+            Test::new("main.rs", 14, 9),
+            Test::new("main.rs", 14, 15),
+            Test::new("main.rs", 15, 15),
+            Test::new("main.rs", 16, 15),
+            Test::new("main.rs", 17, 15),
+            Test::new("main.rs", 30, 12),
+            Test::new("main.rs", 30, 22),
+            Test::new("main.rs", 30, 27),
+            Test::new("main.rs", 31, 7),
+            Test::new("main.rs", 31, 12),
+            Test::new("main.rs", 33, 10),
+            Test::new("main.rs", 33, 16),
+            Test::new("main.rs", 33, 22),
+            Test::new("main.rs", 34, 12),
+            Test::new("main.rs", 38, 14),
+            Test::new("main.rs", 38, 24),
+            Test::new("main.rs", 38, 31),
+            Test::new("main.rs", 38, 35),
+            Test::new("main.rs", 38, 42),
+            Test::new("main.rs", 38, 48),
+            Test::new("main.rs", 39, 12),
+            Test::new("main.rs", 43, 11),
+            Test::new("main.rs", 43, 18),
+            Test::new("main.rs", 43, 25),
+            Test::new("main.rs", 44, 12),
+            Test::new("main.rs", 44, 21),
+            Test::new("main.rs", 44, 28),
+            Test::new("main.rs", 45, 22),
+            Test::new("main.rs", 46, 21),
+            Test::new("main.rs", 46, 28),
+            Test::new("main.rs", 47, 13),
+            Test::new("main.rs", 47, 22),
+            Test::new("main.rs", 47, 28),
+            Test::new("main.rs", 47, 40),
+            Test::new("main.rs", 47, 50),
+            Test::new("main.rs", 48, 19),
+            Test::new("main.rs", 51, 13),
+            Test::new("main.rs", 51, 20),
+            Test::new("main.rs", 56, 12),
+            Test::new("main.rs", 56, 26),
+
+            Test::new("sample.rs", 25, 12),
+            Test::new("sample.rs", 25, 17),
+            Test::new("sample.rs", 46, 14),
+            Test::new("sample.rs", 50, 10),
+            Test::new("sample.rs", 62, 6),
+            Test::new("sample.rs", 81, 14),
+            Test::new("sample.rs", 81, 24),
+            Test::new("sample.rs", 88, 14),
+            Test::new("sample.rs", 88, 70),
+            Test::new("sample.rs", 89, 43),
+            Test::new("sample.rs", 90, 53),
+            Test::new("sample.rs", 99, 12),
+            Test::new("sample.rs", 103, 13),
+            Test::new("sample.rs", 107, 13),
+            Test::new("sample.rs", 119, 14),
+            Test::new("sample.rs", 128, 11),
+            Test::new("sample.rs", 131, 14),
+            Test::new("sample.rs", 131, 26),
+
+            // Test::new("module.rs", 22, 11),
+            // Test::new("module_use.rs", 11, 8),
+            // Test::new("empty_line_before_decl.rs", 19, 14),
+            // Test::new("attributes.rs", 22, 17),
+            // Test::new("attributes.rs", 33, 17),
+
+            Test::new("test_tooltip_mod.rs", 22, 14),
+            Test::new("test_tooltip_mod_use.rs", 11, 14),
+            Test::new("test_tooltip_mod_use.rs", 12, 14),
+            Test::new("test_tooltip_mod_use.rs", 12, 25),
+
+
+            Test::new("test_tooltip_std.rs", 18, 15),
+            Test::new("test_tooltip_std.rs", 18, 27),
+            Test::new("test_tooltip_std.rs", 19, 7),
+            Test::new("test_tooltip_std.rs", 19, 12),
+            Test::new("test_tooltip_std.rs", 20, 12),
+            Test::new("test_tooltip_std.rs", 20, 20),
+            Test::new("test_tooltip_std.rs", 21, 25),
+            Test::new("test_tooltip_std.rs", 22, 33),
+            Test::new("test_tooltip_std.rs", 23, 11),
+            Test::new("test_tooltip_std.rs", 23, 18),
+            Test::new("test_tooltip_std.rs", 24, 24),
+            Test::new("test_tooltip_std.rs", 25, 17),
+            Test::new("test_tooltip_std.rs", 25, 25),
+
+        ];
+
+        let cwd = env::current_dir()?;
+        let out = LineOutput::default();
+        let proj_dir = cwd.join("test_data").join("hover");
+        let save_dir = cwd.join("target").join("hover").join("save_data");
+        let load_dir = proj_dir.join("save_data");
+        
+        let harness = TooltipTestHarness::new(proj_dir, &out);
+
+        out.reset();
+
+        let failures = harness.run_tests(&tests, load_dir, save_dir)?;
+
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            eprintln!("{}\n\n", out.reset().join("\n"));
+            eprintln!("{:#?}\n\n", failures);
+            Err(format!("{} of {} tooltip tests failed", failures.len(), tests.len()).into())
+        }
     }
 }
