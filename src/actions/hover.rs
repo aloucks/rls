@@ -214,7 +214,7 @@ fn tooltip_local_variable_usage(vfs: &Vfs, def: &Def) -> Vec<MarkedString> {
     let docs = None;
     let doc_url = None;
 
-    create_toolip(the_type, doc_url, context, docs)
+    create_tooltip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_field_or_variant(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
@@ -224,7 +224,7 @@ fn tooltip_field_or_variant(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Ve
     let docs = def_docs(def, vfs);
     let context = None;
 
-    create_toolip(the_type, doc_url, context, docs)
+    create_tooltip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_struct_enum_union_trait(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
@@ -245,7 +245,7 @@ fn tooltip_struct_enum_union_trait(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def,
     let docs = def_docs(def, vfs);
     let context = None;
 
-    create_toolip(the_type, doc_url, context, docs)
+    create_tooltip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_mod(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
@@ -258,7 +258,7 @@ fn tooltip_mod(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedStrin
     let docs = def_docs(def, vfs);
     let context = None;
 
-    create_toolip(the_type, doc_url, context, docs)
+    create_tooltip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_function_method(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
@@ -274,7 +274,7 @@ fn tooltip_function_method(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url
     let context = None;
     let docs = def_docs(def, vfs);
 
-    create_toolip(the_type, doc_url, context, docs)
+    create_tooltip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_local_variable_decl(_vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
@@ -284,7 +284,7 @@ fn tooltip_local_variable_decl(_vfs: &Vfs, def: &Def, doc_url: Option<String>) -
     let docs = None;
     let context = None;
 
-    create_toolip(the_type, doc_url, context, docs)
+    create_tooltip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_function_arg_usage(_vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
@@ -294,7 +294,7 @@ fn tooltip_function_arg_usage(_vfs: &Vfs, def: &Def, doc_url: Option<String>) ->
     let docs = None;
     let context = None;
 
-    create_toolip(the_type, doc_url, context, docs)
+    create_tooltip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_function_signature_arg(_vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
@@ -304,7 +304,7 @@ fn tooltip_function_signature_arg(_vfs: &Vfs, def: &Def, doc_url: Option<String>
     let docs = None;
     let context = None;
 
-    create_toolip(the_type, doc_url, context, docs)
+    create_tooltip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_static_const_decl(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
@@ -314,7 +314,7 @@ fn tooltip_static_const_decl(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> V
     let docs = def_docs(def, vfs);
     let context = None;
 
-    create_toolip(the_type, doc_url, context, docs)
+    create_tooltip(the_type, doc_url, context, docs)
 }
 
 fn empty_to_none(s: String) -> Option<String> {
@@ -349,7 +349,7 @@ where
 /// Creates a tooltip using the function, type or other declaration and 
 /// optional doc URL, context, or markdown documentation. No additional
 /// processing or formatting is performed.
-fn create_toolip(
+fn create_tooltip(
     the_type: String,
     doc_url: Option<String>,
     context: Option<String>,
@@ -603,7 +603,7 @@ pub fn tooltip(
             let the_type = racer_def.decl_or_context.unwrap_or(hover_span_typ);
             let context = None;
             let doc_url = None;
-            create_toolip(the_type, doc_url, context, docs)
+            create_tooltip(the_type, doc_url, context, docs)
         } else {
             debug!("tooltip: racer returned: None");
             vec![]
