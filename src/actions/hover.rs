@@ -195,6 +195,7 @@ pub fn extract_decl(vfs: &Vfs, file: &Path, mut row: Row<ZeroIndexed>) -> Result
 }
 
 fn tooltip_local_variable_usage(vfs: &Vfs, def: &Def) -> Vec<MarkedString> {
+    debug!("tooltip_local_variable_usage: {}", def.name);
     let the_type = def.value.trim().into();
     let mut context = String::new();
     match vfs.load_line(&def.span.file, def.span.range.row_start) {
@@ -276,6 +277,46 @@ fn tooltip_function_method(vfs: &Vfs, fmt_config: &FmtConfig, def: &Def, doc_url
     create_toolip(the_type, doc_url, context, docs)
 }
 
+fn tooltip_local_variable_decl(_vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+    debug!("tooltip_local_variable_decl: {}", def.name);
+
+    let the_type = def.value.trim().into();
+    let docs = None;
+    let context = None;
+
+    create_toolip(the_type, doc_url, context, docs)
+}
+
+fn tooltip_function_arg_usage(_vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+    debug!("tooltip_function_arg_usage: {}", def.name);
+
+    let the_type = def.value.trim().into();
+    let docs = None;
+    let context = None;
+
+    create_toolip(the_type, doc_url, context, docs)
+}
+
+fn tooltip_function_signature_arg(_vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+    debug!("tooltip_function_signature_arg: {}", def.name);
+
+    let the_type = def.value.trim().into();
+    let docs = None;
+    let context = None;
+
+    create_toolip(the_type, doc_url, context, docs)
+}
+
+fn tooltip_static_const_decl(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+    debug!("tooltip_static_const_decl: {}", def.name);
+
+    let the_type = def.value.trim().into();
+    let docs = def_docs(def, vfs);
+    let context = None;
+
+    create_toolip(the_type, doc_url, context, docs)
+}
+
 fn empty_to_none(s: String) -> Option<String> {
     if s.trim().is_empty() {
         None
@@ -287,10 +328,9 @@ fn empty_to_none(s: String) -> Option<String> {
 /// Extract and process source documentation for the give `def`.
 fn def_docs(def: &Def, vfs: &Vfs) -> Option<String> {
     let save_analysis_docs = || empty_to_none(def.docs.trim().into());
-    let docs = extract_and_process_docs(&vfs, def.span.file.as_ref(), def.span.range.row_start)
+    extract_and_process_docs(&vfs, def.span.file.as_ref(), def.span.range.row_start)
         .or_else(save_analysis_docs)
-        .filter(|docs| !docs.trim().is_empty());
-    docs
+        .filter(|docs| !docs.trim().is_empty())
 }
 
 /// Returns the type or function declaration from source. If source
@@ -381,7 +421,6 @@ fn racer(
             .filter(|m| name.as_ref().map(|name| name != &m.contextstr).unwrap_or(true))
             .map(|m| {
                 let mut ty = None;
-                trace!("racer: contextstr: {:?}", m.contextstr);
                 let contextstr = m.contextstr.trim_right_matches("{").trim();
                 match m.mtype {
                     racer::MatchType::Module => {
@@ -462,15 +501,18 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
         let mut decl = formatted.trim().trim_right_matches(";");
         if let (Some(pos), true) = (decl.rfind("("), decl.ends_with(")")) {
             let mut hidden_count = 0;
-            let tuple_parts = decl[pos+1..decl.len()-1].split(",").map(|part| {
-                let part = part.trim();
-                if decl.starts_with("pub") && !part.starts_with("pub") {
-                    hidden_count += 1;
-                    "_".to_string()
-                } else {
-                    part.to_string()
-                }
-            }).collect::<Vec<String>>();
+            let tuple_parts = decl[pos+1..decl.len()-1]
+                .split(",")
+                .map(|part| {
+                    let part = part.trim();
+                    if decl.starts_with("pub") && !part.starts_with("pub") {
+                        hidden_count += 1;
+                        "_".to_string()
+                    } else {
+                        part.to_string()
+                    }
+                })
+                .collect::<Vec<String>>();
             decl = &decl[0..pos];
             if hidden_count != tuple_parts.len() {
                 format!("{}({})", decl, tuple_parts.join(", "))
@@ -478,9 +520,11 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
                 format!("{}", decl)
             }
         } else {
+            // not a tuple
             decl.into()
         }
     } else {
+        // not a tuple or unit struct
         formatted
     };
 
@@ -568,47 +612,49 @@ pub fn tooltip(
 
     if let Ok(def) = hover_span_def {
         if def.kind == DefKind::Local && def.span == hover_span && def.qualname.contains("$") {
-            debug!("tooltip: local variable declaration: {}", def.name);
-            contents.push(MarkedString::from_language_code("rust".into(), def.value.trim().into()));
+            contents = tooltip_local_variable_decl(&vfs, &def, doc_url);
         } else if def.kind == DefKind::Local && def.span != hover_span && !def.qualname.contains("$") {
-            debug!("tooltip: function argument usage: {}", def.name);
-            contents.push(MarkedString::from_language_code("rust".into(), def.value.trim().into()));
+            contents = tooltip_function_arg_usage(&vfs, &def, doc_url);
         } else if def.kind == DefKind::Local && def.span != hover_span && def.qualname.contains("$") {
-            debug!("tooltip: local variable usage: {}", def.name);
-            contents.extend(tooltip_local_variable_usage(&vfs, &def));
+            contents = tooltip_local_variable_usage(&vfs, &def);
         } else if def.kind == DefKind::Local && def.span == hover_span {
-            debug!("tooltip: function signature argument: {}", def.name);
-            contents.push(MarkedString::from_language_code("rust".into(), def.value.trim().into()));
-        } else { match def.kind {
-            DefKind::TupleVariant | DefKind::StructVariant | DefKind::Field => {
-                contents.extend(tooltip_field_or_variant(&vfs, &def, doc_url));
-            },
-            DefKind::Enum | DefKind::Union | DefKind::Struct | DefKind::Trait => {
-                contents.extend(tooltip_struct_enum_union_trait(&vfs, &fmt_config, &def, doc_url));
-            },
-            DefKind::Function | DefKind::Method => {
-                contents.extend(tooltip_function_method(&vfs, &fmt_config, &def, doc_url));
-            },
-            DefKind::Mod => {
-                contents.extend(tooltip_mod(&vfs, &def, doc_url));
-            },
-            DefKind::Static | DefKind::Const => {
-                debug!("tooltip: static or const (using racer): {}", def.name);
-                contents.extend(racer_tooltip());
-            },
-            _ => {
-                debug!("tooltip: ignoring def: \
-                        name: {:?}, \
-                        kind: {:?}, \
-                        value: {:?}, \
-                        qualname: {:?}, \
-                        parent: {:?}",
-                    def.name, def.kind, def.value, def.qualname, def.parent);
+            contents = tooltip_function_signature_arg(&vfs, &def, doc_url);
+        } else {
+            match def.kind {
+                DefKind::TupleVariant | DefKind::StructVariant | DefKind::Field => {
+                    contents = tooltip_field_or_variant(&vfs, &def, doc_url);
+                },
+                DefKind::Enum | DefKind::Union | DefKind::Struct | DefKind::Trait => {
+                    contents = tooltip_struct_enum_union_trait(&vfs, &fmt_config, &def, doc_url);
+                },
+                DefKind::Function | DefKind::Method => {
+                    contents = tooltip_function_method(&vfs, &fmt_config, &def, doc_url);
+                },
+                DefKind::Mod => {
+                    contents = tooltip_mod(&vfs, &def, doc_url);
+                },
+                DefKind::Static | DefKind::Const => {
+                    // racer generally provides more content here
+                    debug!("tooltip: static or const (attempting racer first): {}", def.name);
+                    contents = racer_tooltip();
+                    if contents.is_empty() {
+                        contents = tooltip_static_const_decl(&vfs, &def, doc_url);
+                    }
+                },
+                _ => {
+                    debug!("tooltip: ignoring def: \
+                            name: {:?}, \
+                            kind: {:?}, \
+                            value: {:?}, \
+                            qualname: {:?}, \
+                            parent: {:?}",
+                        def.name, def.kind, def.value, def.qualname, def.parent);
+                }
             }
-        }}
+        }
     } else {
         debug!("tooltip: def is empty (using racer)");
-        contents.extend(racer_tooltip());
+        contents = racer_tooltip();
     }
 
     Ok(contents)
@@ -1071,8 +1117,9 @@ pub mod test {
         /// loading saved data. The inner `Result` is the saved output from
         /// `hover::tooltip`.
         pub expect_data: Result<Result<Vec<MarkedString>, String>, String>,
-        /// The current output from `hover::tooltip`.
-        pub actual_data: Result<Vec<MarkedString>, String>,
+        /// The current output from `hover::tooltip`. The inner `Result`
+        /// is the output from `hover::tooltip`.
+        pub actual_data: Result<Result<Vec<MarkedString>, String>, ()>,
     }
 
     #[derive(Clone, Default)]
@@ -1209,7 +1256,7 @@ pub mod test {
                             test: actual_result.test,
                             expect_data: Ok(expect_result.data),
                             expect_file: load_file,
-                            actual_data: actual_result.data,
+                            actual_data: Ok(actual_result.data),
                             actual_file: save_file,
                         }
                     }
@@ -1220,7 +1267,7 @@ pub mod test {
                             test: actual_result.test,
                             expect_data: Err(e.into()),
                             expect_file: load_file,
-                            actual_data: actual_result.data,
+                            actual_data: Ok(actual_result.data),
                             actual_file: save_file,
                         }
                     }
