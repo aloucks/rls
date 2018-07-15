@@ -1218,12 +1218,14 @@ pub mod test {
             )?;
             self.ctx.block_on_build();
 
-            let results: Vec<TestResult> = tests.iter().map(|test| {
-                let result = test.run(&self.project_dir, &self.ctx);
-                result.save(&save_dir).unwrap();
-                result
-            })
-            .collect();
+            let results: Vec<TestResult> = tests
+                .iter()
+                .map(|test| {
+                    let result = test.run(&self.project_dir, &self.ctx);
+                    result.save(&save_dir).unwrap();
+                    result
+                })
+                .collect();
 
             let failures: Vec<TestFailure> = results
                 .iter()
