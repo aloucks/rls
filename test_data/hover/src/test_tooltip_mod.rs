@@ -20,3 +20,12 @@
 /// 
 /// The first item docs should not pick up the module docs.
 pub struct First;
+
+/// Submodule first line
+/// 
+/// Mauris vel lobortis lacus, in condimentum dolor. 
+/// 
+/// Submodule last line
+pub mod sub_module {
+    
+}

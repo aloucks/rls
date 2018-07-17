@@ -26,12 +26,12 @@ pub fn process_docs(docs: &str) -> String {
     for line in docs.lines() {
         let mut trimmed = line.trim();
         if trimmed.starts_with("```") {
-            in_rust_codeblock = trimmed == "```" || 
-                trimmed.contains("rust") || 
-                trimmed.contains("no_run") || 
-                trimmed.contains("ignore") || 
-                trimmed.contains("should_panic") ||
-                trimmed.contains("compile_fail");
+            in_rust_codeblock = trimmed == "```"
+                || trimmed.contains("rust")
+                || trimmed.contains("no_run")
+                || trimmed.contains("ignore")
+                || trimmed.contains("should_panic")
+                || trimmed.contains("compile_fail");
             in_codeblock = !in_codeblock;
             if !in_codeblock {
                 in_rust_codeblock = false;
@@ -1285,44 +1285,6 @@ pub mod test {
     }
 
     #[test]
-    fn test_extract_and_process_docs_module() {
-        let expected = noindent("
-            Sample module
-
-            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas
-            tincidunt tristique maximus. Sed venenatis urna vel sagittis tempus.
-            In hac habitasse platea dictumst.
-
-            # Examples
-
-            ```rust
-            let foo = sample::foo();
-            ```
-        ");
-
-        let vfs = Vfs::new();
-        let file = Path::new("test_data/hover/src/sample.rs");
-        let row_start = Row::new_zero_indexed(0);
-        let actual = extract_and_process_docs(&vfs, file, row_start).expect("module docs");
-        assert_eq!(expected, actual, "hover/sample.rs module docs");
-    }
-
-    #[test]
-    fn test_extract_and_process_docs() {
-        let expected = noindent("
-            The `Baz` variant
-
-            Aliquam erat volutpat.
-        ");
-
-        let vfs = Vfs::new();
-        let file = Path::new("test_data/hover/src/sample.rs");
-        let row_start = Row::new_zero_indexed(61);
-        let actual = extract_and_process_docs(&vfs, file, row_start).expect("module docs");
-        assert_eq!(expected, actual, "hover/sample.rs module docs");
-    }
-
-    #[test]
     fn test_extract_decl() {
         let vfs = Vfs::new();
         let file = Path::new("test_data/hover/src/test_extract_decl.rs");
@@ -1624,78 +1586,49 @@ pub mod test {
         use std::env;
 
         let tests = vec![
-            Test::new("main.rs", 12, 12),
-            Test::new("main.rs", 14, 9),
-            Test::new("main.rs", 14, 15),
-            Test::new("main.rs", 15, 15),
-            Test::new("main.rs", 16, 15),
-            Test::new("main.rs", 17, 15),
-            Test::new("main.rs", 30, 12),
-            Test::new("main.rs", 30, 22),
-            Test::new("main.rs", 30, 27),
-            Test::new("main.rs", 31, 7),
-            Test::new("main.rs", 31, 12),
-            Test::new("main.rs", 33, 10),
-            Test::new("main.rs", 33, 16),
-            Test::new("main.rs", 33, 22),
-            Test::new("main.rs", 34, 12),
-            Test::new("main.rs", 38, 14),
-            Test::new("main.rs", 38, 24),
-            Test::new("main.rs", 38, 31),
-            Test::new("main.rs", 38, 35),
-            Test::new("main.rs", 38, 42),
-            Test::new("main.rs", 38, 48),
-            Test::new("main.rs", 39, 12),
-            Test::new("main.rs", 43, 11),
-            Test::new("main.rs", 43, 18),
-            Test::new("main.rs", 43, 25),
-            Test::new("main.rs", 44, 12),
-            Test::new("main.rs", 44, 21),
-            Test::new("main.rs", 44, 28),
-            Test::new("main.rs", 45, 22),
-            Test::new("main.rs", 46, 21),
-            Test::new("main.rs", 46, 28),
-            Test::new("main.rs", 47, 13),
-            Test::new("main.rs", 47, 22),
-            Test::new("main.rs", 47, 28),
-            Test::new("main.rs", 47, 40),
-            Test::new("main.rs", 47, 50),
-            Test::new("main.rs", 48, 19),
-            Test::new("main.rs", 51, 13),
-            Test::new("main.rs", 51, 20),
-            Test::new("main.rs", 56, 12),
-            Test::new("main.rs", 56, 26),
-
-            Test::new("sample.rs", 25, 12),
-            Test::new("sample.rs", 25, 17),
-            Test::new("sample.rs", 46, 14),
-            Test::new("sample.rs", 50, 10),
-            Test::new("sample.rs", 62, 6),
-            Test::new("sample.rs", 81, 14),
-            Test::new("sample.rs", 81, 24),
-            Test::new("sample.rs", 88, 14),
-            Test::new("sample.rs", 88, 70),
-            Test::new("sample.rs", 89, 43),
-            Test::new("sample.rs", 90, 53),
-            Test::new("sample.rs", 99, 12),
-            Test::new("sample.rs", 103, 13),
-            Test::new("sample.rs", 107, 13),
-            Test::new("sample.rs", 119, 14),
-            Test::new("sample.rs", 128, 11),
-            Test::new("sample.rs", 131, 14),
-            Test::new("sample.rs", 131, 26),
-
-            // Test::new("module.rs", 22, 11),
-            // Test::new("module_use.rs", 11, 8),
-            // Test::new("empty_line_before_decl.rs", 19, 14),
-            // Test::new("attributes.rs", 22, 17),
-            // Test::new("attributes.rs", 33, 17),
+            Test::new("test_tooltip_01.rs", 13, 11),
+            Test::new("test_tooltip_01.rs", 15, 7),
+            Test::new("test_tooltip_01.rs", 17, 7),
+            Test::new("test_tooltip_01.rs", 21, 13),
+            Test::new("test_tooltip_01.rs", 23, 9),
+            Test::new("test_tooltip_01.rs", 23, 16),
+            Test::new("test_tooltip_01.rs", 25, 8),
+            Test::new("test_tooltip_01.rs", 27, 8),
+            Test::new("test_tooltip_01.rs", 27, 8),
+            Test::new("test_tooltip_01.rs", 30, 11),
+            Test::new("test_tooltip_01.rs", 32, 10),
+            Test::new("test_tooltip_01.rs", 32, 19),
+            Test::new("test_tooltip_01.rs", 32, 26),
+            Test::new("test_tooltip_01.rs", 32, 35),
+            Test::new("test_tooltip_01.rs", 32, 49),
+            Test::new("test_tooltip_01.rs", 33, 11),
+            Test::new("test_tooltip_01.rs", 34, 16),
+            Test::new("test_tooltip_01.rs", 34, 23),
+            Test::new("test_tooltip_01.rs", 35, 16),
+            Test::new("test_tooltip_01.rs", 35, 23),
+            Test::new("test_tooltip_01.rs", 36, 16),
+            Test::new("test_tooltip_01.rs", 36, 23),
+            Test::new("test_tooltip_01.rs", 42, 15),
+            Test::new("test_tooltip_01.rs", 56, 6),
+            Test::new("test_tooltip_01.rs", 66, 6),
+            Test::new("test_tooltip_01.rs", 67, 30),
+            Test::new("test_tooltip_01.rs", 68, 11),
+            Test::new("test_tooltip_01.rs", 68, 26),
+            Test::new("test_tooltip_01.rs", 75, 10),
+            Test::new("test_tooltip_01.rs", 80, 11),
+            Test::new("test_tooltip_01.rs", 85, 14),
+            Test::new("test_tooltip_01.rs", 85, 50),
+            Test::new("test_tooltip_01.rs", 85, 54),
+            Test::new("test_tooltip_01.rs", 86, 7),
+            Test::new("test_tooltip_01.rs", 86, 10),
+            Test::new("test_tooltip_01.rs", 87, 20),
+            Test::new("test_tooltip_01.rs", 88, 18),
 
             Test::new("test_tooltip_mod.rs", 22, 14),
             Test::new("test_tooltip_mod_use.rs", 11, 14),
             Test::new("test_tooltip_mod_use.rs", 12, 14),
             Test::new("test_tooltip_mod_use.rs", 12, 25),
-
+            Test::new("test_tooltip_mod_use.rs", 13, 28),
 
             Test::new("test_tooltip_std.rs", 18, 15),
             Test::new("test_tooltip_std.rs", 18, 27),
@@ -1710,7 +1643,6 @@ pub mod test {
             Test::new("test_tooltip_std.rs", 24, 24),
             Test::new("test_tooltip_std.rs", 25, 17),
             Test::new("test_tooltip_std.rs", 25, 25),
-
         ];
 
         let cwd = env::current_dir()?;
