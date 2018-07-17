@@ -1014,15 +1014,7 @@ version = "0.129.0"
 dependencies = [
  "cargo 0.30.0 (git+https://github.com/rust-lang/cargo?rev=af9e40c26b4ea2ebd6f31ee86ee61d5ac1c74eb0)",
  "cargo_metadata 0.5.8 (registry+https://github.com/rust-lang/crates.io-index)",
-<<<<<<< HEAD
  "clippy_lints 0.0.212 (git+https://github.com/rust-lang-nursery/rust-clippy?rev=f27aaacb9bf1d0d3492f20f92346bb1aaf45e3d8)",
-=======
- "clippy_lints 0.0.212 (git+https://github.com/rust-lang-nursery/rust-clippy?rev=06d6710147742892efc17ed307b3397bfe093bc7)",
-<<<<<<< HEAD
- "difference 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
->>>>>>> Adding hover tooltip unit tests
-=======
->>>>>>> Removing difference/changeset
  "env_logger 0.5.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "itertools 0.7.8 (registry+https://github.com/rust-lang/crates.io-index)",
