@@ -38,16 +38,17 @@ pub fn process_docs(docs: &str) -> String {
                 in_rust_codeblock = false;
             }
         }
-        let mut line = line.to_string();
-        if in_rust_codeblock && trimmed.starts_with("```") {
-            line = "```rust".into();
-        }
+        let mut line = if in_rust_codeblock && trimmed.starts_with("```") {
+            "```rust".into()
+        } else {
+            line.to_string()
+        };
 
         // Racer sometimes pulls out comment block headers from the standard library
         let ignore_slashes = line.starts_with("////");
 
         let is_attribute = trimmed.starts_with("#[") && in_rust_codeblock;
-        let is_hidden = trimmed.starts_with("#") && in_rust_codeblock && !is_attribute;
+        let is_hidden = trimmed.starts_with('#') && in_rust_codeblock && !is_attribute;
 
         let ignore_whitespace = last_line_ignored && trimmed.is_empty();
         let ignore_line = ignore_slashes || ignore_whitespace || is_hidden;
@@ -72,7 +73,7 @@ pub fn extract_docs(
     file: &Path,
     row_start: Row<ZeroIndexed>
 ) -> Result<Vec<String>, vfs::Error> {
-    let up = if row_start.0 == 0 { false } else { true };
+    let up = row_start.0 > 0;
     debug!("extract_docs: row_start = {:?}, up = {:?}, file = {:?}", row_start, up, file);
 
     let mut docs: Vec<String> = Vec::new();
@@ -100,36 +101,34 @@ pub fn extract_docs(
 
         let line = line.trim();
 
-        if line.starts_with("#[") && line.ends_with("]") && !hit_top {
+        if line.starts_with("#[") && line.ends_with(']') && !hit_top {
             // Ignore single line attributes
             continue;
         }
 
         // Continue with the next line when transitioning out of a
         // multi-line attribute
-        if line.starts_with("#[") {
+        if line.starts_with("#[") || (line.ends_with(']') && !line.starts_with("//")) {
             in_meta = !in_meta;
-            if !in_meta && !hit_top { continue };
-        } else if line.ends_with("]") && !line.starts_with("//") {
-            in_meta = !in_meta;
-            if !in_meta && !hit_top { continue };
+            if !in_meta && !hit_top { 
+                continue
+            };
         }
 
         if in_meta {
             // Ignore milti-line attributes
             continue;
         } else if line.starts_with("////") {
-            // Break if we reach a comment header block (which is frequent
-            // in the standard library)
+            trace!("extract_docs: break on comment header block, next_row: {:?}, up: {}", next_row, up);
             break;
         } else if line.starts_with("///") && !up {
-            // Prevent loading non-mod docs for modules
+            trace!("extract_docs: break on non-module docs, next_row: {:?}, up: {}", next_row, up);
             break;
         } else if line.starts_with("//!") && up {
-            // Prevent loading mod-docs for non-modules
+            trace!("extract_docs: break on module docs, next_row: {:?}, up: {}", next_row, up);
             break;
         } else if line.starts_with("///") || line.starts_with("//!") {
-            let pos = if line.chars().skip(3).next().map(|c| c.is_whitespace()).unwrap_or(false) {
+            let pos = if line.chars().nth(3).map(|c| c.is_whitespace()).unwrap_or(false) {
                 4
             } else {
                 3
@@ -146,18 +145,17 @@ pub fn extract_docs(
                 next_row, up);
             break;
         } else if line.starts_with("//") {
-            // Ignore non-doc comments, but continue scanning. This is
-            // required to skip copyright notices at the start of modules.
+            trace!("extract_docs: ignoring non-doc comment, next_row: {:?}, up: {}", next_row, up);
             continue;
         } else if line.is_empty() {
-            // Ignore gaps
+            trace!("extract_docs: ignoring empty line, next_row: {:?}, up: {}", next_row, up);
             continue;
         } else {
-            // Otherwise, we've reached the end of the docs
+            trace!("extract_docs: end of docs, next_row: {:?}, up: {}", next_row, up);
             break;
         }
     }
-    debug!("extract_docs: row_end = {:?} (exclusive), up = {:?}, file = {:?}", row, up, file);
+    debug!("extract_docs: complete: row_end = {:?} (exclusive), up = {:?}, file = {:?}", row, up, file);
     Ok(docs)
 }
 
@@ -173,7 +171,7 @@ fn extract_and_process_docs(
         .ok()
         .map(|docs| docs.join("\n"))
         .map(|docs| process_docs(&docs))
-        .and_then(|docs| empty_to_none(docs))
+        .and_then(empty_to_none)
 }
 
 /// Extracts a function, method, struct, enum, or trait decleration
@@ -190,11 +188,11 @@ pub fn extract_decl(
             Ok(line) => {
                 row = Row::new_zero_indexed(row.0.saturating_add(1));
                 let mut line = line.trim();
-                if let Some(pos) = line.rfind("{") {
+                if let Some(pos) = line.rfind('{') {
                     line = &line[0..pos].trim_right();
                     lines.push(line.into());
                     break;
-                } else if line.ends_with(";") {
+                } else if line.ends_with(';') {
                     let pos = line.len() - 1;
                     line = &line[0..pos].trim_right();
                     lines.push(line.into());
@@ -224,7 +222,7 @@ fn tooltip_local_variable_usage(vfs: &Vfs, def: &Def) -> Vec<MarkedString> {
             error!("local_variable_usage: error = {:?}", e);
         }
     }
-    if context.ends_with("{") {
+    if context.ends_with('{') {
         context.push_str(" ... }");
     }
 
@@ -463,7 +461,7 @@ fn racer(vfs: Arc<Vfs>, fmt_config: FmtConfig, span: &Span<ZeroIndexed>) -> Opti
             .filter(|m| name.as_ref().map(|name| name != &m.contextstr).unwrap_or(true))
             .map(|m| {
                 let mut ty = None;
-                let contextstr = m.contextstr.trim_right_matches("{").trim();
+                let contextstr = m.contextstr.trim_right_matches('{').trim();
                 use racer::MatchType::{Module, Function, Trait, Enum, Struct};
                 match m.mtype {
                     Module => {
@@ -485,7 +483,7 @@ fn racer(vfs: Arc<Vfs>, fmt_config: FmtConfig, span: &Span<ZeroIndexed>) -> Opti
                 debug!("racer: decl_or_context: {:?}, docs.is_some: {}", ty, docs.is_some());
                 RacerDef {
                     decl_or_context: ty,
-                    docs: docs,
+                    docs,
                 }
             })
             .next()
@@ -506,14 +504,12 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
     let trimmed = the_type.trim();
 
     // Normalize the ending for rustfmt
-    let object = if trimmed.ends_with(")") {
+    let object = if trimmed.ends_with(')') {
         format!("{};", trimmed)
-    } else if trimmed.ends_with("}") {
+    } else if trimmed.ends_with('}') || trimmed.ends_with(';') {
         trimmed.to_string()
-    } else if trimmed.ends_with(";") {
-        trimmed.to_string()
-    } else if trimmed.ends_with("{") {
-        let trimmed = trimmed.trim_right_matches("{").to_string();
+    } else if trimmed.ends_with('{') {
+        let trimmed = trimmed.trim_right_matches('{').to_string();
         format!("{}{{}}", trimmed)
     } else {
         format!("{}{{}}", trimmed)
@@ -524,12 +520,12 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
     let formatted = match rustfmt::format_input(input, &config, Some(&mut out)) {
         Ok(_) => {
             let utf8 = String::from_utf8(out);
-            match utf8.map(|lines| (lines.rfind("{"), lines)) {
+            match utf8.map(|lines| (lines.rfind('{'), lines)) {
                 Ok((Some(pos), lines)) => {
                     lines[0..pos].into()
                 },
                 Ok((None, lines)) => {
-                    lines.into()
+                    lines
                 },
                 _ => trimmed.into(),
             }
@@ -542,12 +538,12 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
 
     // If it's a tuple, remove the trailing ';' and hide non-pub components
     // for pub types
-    let result = if formatted.trim().ends_with(";") {
-        let mut decl = formatted.trim().trim_right_matches(";");
-        if let (Some(pos), true) = (decl.rfind("("), decl.ends_with(")")) {
+    let result = if formatted.trim().ends_with(';') {
+        let mut decl = formatted.trim().trim_right_matches(';');
+        if let (Some(pos), true) = (decl.rfind('('), decl.ends_with(')')) {
             let mut hidden_count = 0;
             let tuple_parts = decl[pos+1..decl.len()-1]
-                .split(",")
+                .split(',')
                 .map(|part| {
                     let part = part.trim();
                     if decl.starts_with("pub") && !part.starts_with("pub") {
@@ -562,7 +558,7 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
             if hidden_count != tuple_parts.len() {
                 format!("{}({})", decl, tuple_parts.join(", "))
             } else {
-                format!("{}", decl)
+                decl.to_string()
             }
         } else {
             // not a tuple
@@ -580,7 +576,7 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
 /// in the event of an error.
 fn format_method(fmt_config: &FmtConfig, the_type: String) -> String {
     trace!("format_method: {}", the_type);
-    let the_type = the_type.trim().trim_right_matches(";").to_string();
+    let the_type = the_type.trim().trim_right_matches(';').to_string();
     let config = fmt_config.get_rustfmt_config();
     let method = format!("impl Dummy {{ {} {{ unimplmented!() }} }}", the_type);
     let mut out = Vec::<u8>::with_capacity(the_type.len());
@@ -588,10 +584,10 @@ fn format_method(fmt_config: &FmtConfig, the_type: String) -> String {
     let result = match rustfmt::format_input(input, config, Some(&mut out)) {
         Ok(_) => {
             if let Ok(mut lines) = String::from_utf8(out) {
-                if let Some(front_pos) = lines.find("{") {
+                if let Some(front_pos) = lines.find('{') {
                     lines = lines[front_pos..].chars().skip(1).collect();
                 }
-                if let Some(back_pos) = lines.rfind("{") {
+                if let Some(back_pos) = lines.rfind('{') {
                     lines = lines[0..back_pos].into();
                 }
                 lines.lines().filter(|line| line.trim() != "").map(|line| {
@@ -655,11 +651,11 @@ pub fn tooltip(
     };
 
     let contents = if let Ok(def) = hover_span_def {
-        if def.kind == DefKind::Local && def.span == hover_span && def.qualname.contains("$") {
+        if def.kind == DefKind::Local && def.span == hover_span && def.qualname.contains('$') {
             tooltip_local_variable_decl(&vfs, &def, doc_url)
-        } else if def.kind == DefKind::Local && def.span != hover_span && !def.qualname.contains("$") {
+        } else if def.kind == DefKind::Local && def.span != hover_span && !def.qualname.contains('$') {
             tooltip_function_arg_usage(&vfs, &def, doc_url)
-        } else if def.kind == DefKind::Local && def.span != hover_span && def.qualname.contains("$") {
+        } else if def.kind == DefKind::Local && def.span != hover_span && def.qualname.contains('$') {
             tooltip_local_variable_usage(&vfs, &def)
         } else if def.kind == DefKind::Local && def.span == hover_span {
             tooltip_function_signature_arg(&vfs, &def, doc_url)
