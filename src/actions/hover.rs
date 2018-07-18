@@ -194,7 +194,8 @@ pub fn extract_decl(
                     line = &line[0..pos].trim_right();
                     lines.push(line.into());
                     break;
-                } else if let Some(pos) = line.rfind(";") {
+                } else if line.ends_with(";") {
+                    let pos = line.len() - 1;
                     line = &line[0..pos].trim_right();
                     lines.push(line.into());
                     break;
@@ -519,7 +520,7 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
     };
 
     let mut out = Vec::<u8>::with_capacity(the_type.len());
-    let input = FmtInput::Text(object);
+    let input = FmtInput::Text(object.clone());
     let formatted = match rustfmt::format_input(input, &config, Some(&mut out)) {
         Ok(_) => {
             let utf8 = String::from_utf8(out);
@@ -534,7 +535,7 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
             }
         },
         Err(e) => {
-            error!("format_object: error: {:?}", e);
+            error!("format_object: error: {:?}, input: {:?}", e, object);
             trimmed.to_string()
         }
     };
@@ -583,7 +584,7 @@ fn format_method(fmt_config: &FmtConfig, the_type: String) -> String {
     let config = fmt_config.get_rustfmt_config();
     let method = format!("impl Dummy {{ {} {{ unimplmented!() }} }}", the_type);
     let mut out = Vec::<u8>::with_capacity(the_type.len());
-    let input = FmtInput::Text(method);
+    let input = FmtInput::Text(method.clone());
     let result = match rustfmt::format_input(input, config, Some(&mut out)) {
         Ok(_) => {
             if let Ok(mut lines) = String::from_utf8(out) {
@@ -607,7 +608,7 @@ fn format_method(fmt_config: &FmtConfig, the_type: String) -> String {
             }
         },
         Err(e) => {
-            error!("format_method: error: {:?}", e);
+            error!("format_method: error: {:?}, input: {:?}", e, method);
             the_type
         }
     };
@@ -1305,13 +1306,32 @@ pub mod test {
         ");
         let result = format_method(config, input.into());
         assert_eq!(expected, result, "long method signature with generic");
+
+        let input = noindent("
+            fn matrix_something(
+            _a_matrix: [[f32; 4]; 4],
+            _b_matrix: [[f32; 4]; 4],
+            _c_matrix: [[f32; 4]; 4],
+            _d_matrix: [[f32; 4]; 4],
+            )
+        ");
+        let expected = noindent("
+            fn matrix_something(
+                _a_matrix: [[f32; 4]; 4],
+                _b_matrix: [[f32; 4]; 4],
+                _c_matrix: [[f32; 4]; 4],
+                _d_matrix: [[f32; 4]; 4],
+            )
+        ");
+        let result = format_method(config, input.into());
+        assert_eq!(expected, result, "function with multiline args");
     }
 
     #[test]
     fn test_extract_decl() {
         let vfs = Vfs::new();
         let file = Path::new("test_data/hover/src/test_extract_decl.rs");
-
+        
         let expected = "pub fn foo() -> Foo<u32>";
         let row_start = Row::new_zero_indexed(10);
         let actual = extract_decl(&vfs, file, row_start)
@@ -1459,6 +1479,26 @@ pub mod test {
         let result = format_object(config, input.into());
         assert_eq!(expected, result,
             "trait with where clause");
+    }
+
+    #[test]
+    fn test_extract_decl_multiline_empty_function() {
+        let vfs = Vfs::new();
+        let file = Path::new("test_data/hover/src/test_extract_decl_multiline_empty_function.rs");
+        
+        let expected = noindent("
+            fn matrix_something(
+            _a_matrix: [[f32; 4]; 4],
+            _b_matrix: [[f32; 4]; 4],
+            _c_matrix: [[f32; 4]; 4],
+            _d_matrix: [[f32; 4]; 4],
+            )
+        ");
+        let row_start = Row::new_zero_indexed(21);
+        let actual = extract_decl(&vfs, file, row_start)
+            .expect("the empty body should not be extracted")
+            .join("\n");
+        assert_eq!(expected, actual);
     }
 
     #[test]
