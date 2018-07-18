@@ -11,7 +11,7 @@ os:
 - osx
 rust:
 - nightly
-install:
+install: |
     # Required for Racer autoconfiguration
     rustup component add rust-src
     rustup component add rust-analysis
