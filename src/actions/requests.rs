@@ -23,7 +23,6 @@ use crate::actions::hover;
 use crate::actions::work_pool;
 use crate::actions::work_pool::WorkDescription;
 use crate::actions::run::collect_run_actions;
-use analysis::{Def, DefKind};
 use crate::lsp_data;
 use crate::lsp_data::*;
 use crate::server;
@@ -135,68 +134,6 @@ impl RequestAction for Symbols {
     }
 }
 
-<<<<<<< HEAD
-/// Extracts hover docs and the context string information using racer.
-fn hover_racer(ctx: &InitActionContext, span: &span::Span<span::ZeroIndexed>, def: Option<&Def>) -> Option<(String, Option<String>)> {
-    trace!("hover_racer: def.name: {:?}", def.map(|def| &def.name));
-    let vfs = ctx.vfs.clone();
-    let file_path = &span.file;
-
-    if !file_path.as_path().exists() {
-        trace!("hover_racer: skipping non-existant file: {:?}", file_path);
-        return None;
-    }
-
-    let name = vfs.load_line(file_path.as_path(), span.range.row_start).ok().and_then(|line| {
-        let col_start = span.range.col_start.0 as usize;
-        let col_end = span.range.col_end.0 as usize;
-        line.get(col_start..col_end).map(|line| line.to_string())
-    });
-
-    trace!("hover_racer: name: {:?}", name);
-
-    let results = ::std::panic::catch_unwind(move || {
-        let cache = racer::FileCache::new(vfs);
-        let session = racer::Session::new(&cache);
-        let row = span.range.row_end.one_indexed();
-        let coord = racer_coord(row, span.range.col_end);
-        let location = racer::Location::Coords(coord);
-        trace!("hover_racer: file_path: {:?}, location: {:?}", file_path, location);
-        let matches = racer::complete_from_file(file_path, location, &session);
-        matches
-            // Remove any matches that don't match the def or span name.
-            .filter(|m| {
-                def.map(|def| def.name == m.matchstr)
-                   .unwrap_or(name.as_ref().map(|name| name == &m.matchstr).unwrap_or(false))
-            })
-            // Avoid duplicate lines when the context string and the name are the same
-            .filter(|m| {
-                name.as_ref().map(|name| name != &m.contextstr).unwrap_or(true)
-            })
-            .map(|m| {
-                let mut ty = None;
-                if m.mtype != racer::MatchType::Module {
-                    ty = Some(m.contextstr.trim_right_matches("{").trim().into());
-                }
-                trace!("hover_racer: racer_ty: {:?}", ty);
-                (m.docs, ty)
-            })
-            .next()
-    });
-
-    let results = results.map_err(|_| {
-        eprintln!("hover_racer: racer panicked");
-    });
-
-    if results.is_err() {
-        return None;
-    }
-
-    results.unwrap()
-}
-
-=======
->>>>>>> Refactor hover tooltips
 impl RequestAction for Hover {
     type Response = lsp_data::Hover;
 
@@ -211,126 +148,7 @@ impl RequestAction for Hover {
         ctx: InitActionContext,
         params: Self::Params,
     ) -> Result<Self::Response, ResponseError> {
-
-<<<<<<< HEAD
-        match analysis.id(&span).and_then(|id| analysis.get_def(id)) {
-            Ok(ref def) => {
-                trace!("hover: def: {:?}", def);
-                // Add some additional context to the type information. This is generally overridden by the data
-                // from racer, but it's needed in the event that `full_docs` is enabled or racer doesn't return
-                // anything. The type information from racer is usually a little richer and contains the generic
-                // types, lifetimes, and trait bounds.
-                match def.kind {
-                    DefKind::Function | DefKind::Method => {
-                        ty = ty.replace("fn ", &format!("fn {}", def.name));
-                    },
-                    DefKind::Struct => {
-                        ty = format!("struct {}", def.name);
-                    },
-                    DefKind::Enum => {
-                        ty = format!("enum {}", def.name);
-                    },
-                    DefKind::Union => {
-                        ty = format!("union {}", def.name);
-                    },
-                    DefKind::Const => {
-                        ty = format!("const {}: {}", def.name, ty);
-                    },
-                    DefKind::Static => {
-                        ty = format!("static {}: {}", def.name, ty);
-                    },
-                    DefKind::Local | DefKind::Field => {
-                        append_racer_ty = true;
-                        trace!("hover: append_racer_ty: {}", append_racer_ty);
-                    }
-                    _ => ()
-                };
-                // Fall back to racer if full_docs aren't available or if the number of lines is <= 1.
-                // It may be desirable to always check racer for local and field defs even when full_docs
-                // are enabled so that the variable declaration are displayed via the racer context string.
-                if !full_docs || docs.lines().count() <= 1 || append_racer_ty {
-                    if let Some((racer_docs, racer_ty)) = hover_racer(&ctx, &span, Some(def)) {
-                        trace!("hover: found racer docs: def: Some(def)");
-                        if racer_docs.len() > docs.len() {
-                            trace!("hover: using racer docs");
-                            docs = racer_docs;
-                        };
-                        if let Some(racer_ty) = racer_ty {
-                            trace!("hover: using racer ty");
-                            ty = update_ty(&ty, &racer_ty, append_racer_ty);
-                        }
-                    }
-                }
-            },
-            _ => {
-                // Fall back to racer if no def is available
-                if let Some((racer_docs, racer_ty)) = hover_racer(&ctx, &span, None) {
-                    trace!("hover: found racer docs: def: None");
-                    if racer_docs.len() > docs.len() {
-                        trace!("hover: using racer docs");
-                        docs = racer_docs;
-                    };
-                    if let Some(racer_ty) = racer_ty {
-                        trace!("hover: using racer ty");
-                        ty = update_ty(&ty, &racer_ty, append_racer_ty);
-                    }
-                }
-            }
-        };
-
-        let mut contents = vec![];
-        if !ty.is_empty() {
-            // If the first line of the type/context section looks like a function signature, format it as such. The
-            // signature needs to be wrapped in an impl to get rustfmt to work correctly with &self methods. If
-            // formatting fails, fall back on the original line.
-            //
-            // Any remaining lines (there should only be one) are treated as context.
-            ty = ty.trim().replace("> (", ">(").replace("->(", "-> (");
-            for (i, line) in ty.lines().enumerate() {
-                if i == 0 && (line.starts_with("fn") || line.starts_with("pub fn")) {
-                    let config = ctx.fmt_config().get_rustfmt_config().clone();
-                    let mut out = Vec::<u8>::with_capacity(line.len());
-                    let unimplemented = " {unimplemented!()}";
-                    let line_fn = format!("impl Dummy {{ {}{} }}", line, unimplemented);
-                    let lines = if let Ok(_) = format_input(FmtInput::Text(line_fn), &config, Some(&mut out)) {
-                        let mut lines = String::from_utf8(out).unwrap_or_else(|_| line.into());
-                        if let Some(front_pos) = lines.find("{") {
-                            lines = lines[1+front_pos..].into();
-                            trace!("front_pos: {} {}", front_pos, lines);
-                        }
-                        if let Some(back_pos) = lines.rfind("{") {
-                            lines = lines[0..back_pos].into();
-                            trace!("back_pos: {} {}", back_pos, lines);
-                        }
-                        lines.lines().filter(|line| line.trim() != "").map(|line| {
-                            format!("{}\n", &line[config.tab_spaces()..])
-                        }).collect()
-                    } else {
-                        line.into()
-                    };
-                    contents.push(MarkedString::from_language_code("rust".into(), lines));
-                } else if i == 0 {
-                    contents.push(MarkedString::from_language_code("rust".into(), line.into()));
-                } else {
-                    let line = format!("\n{}", line.trim());
-                    contents.push(MarkedString::from_language_code("rust".into(), line.into()));
-                }
-            }
-        }
-
-        if !doc_url.is_empty() {
-            let newlines = if contents.is_empty() { "" } else { "\n\n" };
-            contents.push(MarkedString::from_markdown(format!("{}{}", newlines, doc_url.trim())));
-        }
-
-        if !docs.is_empty() {
-            let processed_docs = lsp_data::postprocess_docs(&docs);
-            let newlines = if contents.is_empty() { "" } else { "\n\n" };
-            contents.push(MarkedString::from_markdown(format!("{}{}", newlines, processed_docs.trim())));
-        }
-=======
         let tooltip = hover::tooltip(&ctx, &params)?;
->>>>>>> Refactor hover tooltips
 
         Ok(lsp_data::Hover {
             contents: HoverContents::Array(tooltip),

@@ -1,18 +1,18 @@
-use actions::requests::racer_coord;
-use actions::InitActionContext;
-use analysis::{Def, DefKind};
-use config::FmtConfig;
-use lsp_data::*;
+use crate::actions::requests::racer_coord;
+use crate::actions::InitActionContext;
+use rls_analysis::{Def, DefKind};
+use crate::config::FmtConfig;
+use crate::lsp_data::*;
 use racer;
-use rustfmt::{self, Input as FmtInput};
-use server::ResponseError;
-use span::{Span, ZeroIndexed, Row};
-use vfs::{self, Vfs};
+use rustfmt_nightly::{self as rustfmt, Input as FmtInput};
+use crate::server::ResponseError;
+use rls_span::{Span, ZeroIndexed, Row};
+use rls_vfs::{self as vfs, Vfs};
 
 use std::path::Path;
 use std::sync::Arc;
 
-/// Cleanup documentation code blocks. The `docs` are expected to have 
+/// Cleanup documentation code blocks. The `docs` are expected to have
 /// the preceeding `///` or `//!` prefixes already trimmed away. Rust code
 /// blocks will ignore lines beginning with `#`. Code block annotations
 /// that are common to Rust will be converted to `to allow for markdown
@@ -41,7 +41,7 @@ pub fn process_docs(docs: &str) -> String {
         if in_rust_codeblock && trimmed.starts_with("```") {
             line = "```rust".into();
         }
-        
+
         // Racer sometimes pulls out comment block headers from the standard library
         let ignore_slashes = line.starts_with("////");
 
@@ -68,15 +68,15 @@ pub fn process_docs(docs: &str) -> String {
 /// row and move _upward_.
 pub fn extract_docs(
     vfs: &Vfs,
-    file: &Path, 
+    file: &Path,
     row_start: Row<ZeroIndexed>
 ) -> Result<Vec<String>, vfs::Error> {
     let up = if row_start.0 == 0 { false } else { true };
     debug!("extract_docs: row_start = {:?}, up = {:?}, file = {:?}", row_start, up, file);
 
     let mut docs: Vec<String> = Vec::new();
-    let mut row = if up { 
-        Row::new_zero_indexed(row_start.0.saturating_sub(1)) 
+    let mut row = if up {
+        Row::new_zero_indexed(row_start.0.saturating_sub(1))
     } else {
         Row::new_zero_indexed(row_start.0)
     };
@@ -85,8 +85,8 @@ pub fn extract_docs(
     loop {
         let line = vfs.load_line(file, row)?;
 
-        let next_row = if up { 
-            Row::new_zero_indexed(row.0.saturating_sub(1)) 
+        let next_row = if up {
+            Row::new_zero_indexed(row.0.saturating_sub(1))
         } else {
             Row::new_zero_indexed(row.0.saturating_add(1))
         };
@@ -102,8 +102,8 @@ pub fn extract_docs(
         if line.starts_with("#[") && line.ends_with("]") && !hit_top {
             // Ignore single line attributes
             continue;
-        } 
-        
+        }
+
         // Continue with the next line when transitioning out of a
         // multi-line attribute
         if line.starts_with("#[") {
@@ -113,7 +113,7 @@ pub fn extract_docs(
             in_meta = !in_meta;
             if !in_meta && !hit_top { continue };
         }
-        
+
         if in_meta {
             // Ignore milti-line attributes
             continue;
@@ -141,7 +141,7 @@ pub fn extract_docs(
             }
         } else if hit_top {
             // The top of the file was reached
-            debug!("extract_docs: bailing out: prev_row == next_row; next_row = {:?}, up = {}", 
+            debug!("extract_docs: bailing out: prev_row == next_row; next_row = {:?}, up = {}",
                 next_row, up);
             break;
         } else if line.starts_with("//") {
@@ -161,8 +161,8 @@ pub fn extract_docs(
 }
 
 fn extract_and_process_docs(
-    vfs: &Vfs, 
-    file: &Path, 
+    vfs: &Vfs,
+    file: &Path,
     row_start: Row<ZeroIndexed>
 ) -> Option<String> {
     extract_docs(vfs, file, row_start)
@@ -178,8 +178,8 @@ fn extract_and_process_docs(
 /// Extracts a function, method, struct, enum, or trait decleration
 /// from source.
 pub fn extract_decl(
-    vfs: &Vfs, 
-    file: &Path, 
+    vfs: &Vfs,
+    file: &Path,
     mut row: Row<ZeroIndexed>
 ) -> Result<Vec<String>, vfs::Error> {
     debug!("extract_decl: row_start: {:?}, file: {:?}", row, file);
@@ -234,8 +234,8 @@ fn tooltip_local_variable_usage(vfs: &Vfs, def: &Def) -> Vec<MarkedString> {
 }
 
 fn tooltip_field_or_variant(
-    vfs: &Vfs, 
-    def: &Def, 
+    vfs: &Vfs,
+    def: &Def,
     doc_url: Option<String>
 ) -> Vec<MarkedString> {
     debug!("tooltip_field_or_variant: {}", def.name);
@@ -248,9 +248,9 @@ fn tooltip_field_or_variant(
 }
 
 fn tooltip_struct_enum_union_trait(
-    vfs: &Vfs, 
-    fmt_config: &FmtConfig, 
-    def: &Def, 
+    vfs: &Vfs,
+    fmt_config: &FmtConfig,
+    def: &Def,
     doc_url: Option<String>
 ) -> Vec<MarkedString> {
     debug!("tooltip_struct_enum_union_trait: {}", def.name);
@@ -287,8 +287,8 @@ fn tooltip_mod(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedStrin
 }
 
 fn tooltip_function_method(
-    vfs: &Vfs, 
-    fmt_config: &FmtConfig, 
+    vfs: &Vfs,
+    fmt_config: &FmtConfig,
     def: &Def, doc_url: Option<String>
 ) -> Vec<MarkedString> {
     debug!("tooltip_function_method: {}", def.name);
@@ -307,8 +307,8 @@ fn tooltip_function_method(
 }
 
 fn tooltip_local_variable_decl(
-    _vfs: &Vfs, 
-    def: &Def, 
+    _vfs: &Vfs,
+    def: &Def,
     doc_url: Option<String>
 ) -> Vec<MarkedString> {
     debug!("tooltip_local_variable_decl: {}", def.name);
@@ -321,8 +321,8 @@ fn tooltip_local_variable_decl(
 }
 
 fn tooltip_function_arg_usage(
-    _vfs: &Vfs, 
-    def: &Def, 
+    _vfs: &Vfs,
+    def: &Def,
     doc_url: Option<String>
 ) -> Vec<MarkedString> {
     debug!("tooltip_function_arg_usage: {}", def.name);
@@ -335,8 +335,8 @@ fn tooltip_function_arg_usage(
 }
 
 fn tooltip_function_signature_arg(
-    _vfs: &Vfs, 
-    def: &Def, 
+    _vfs: &Vfs,
+    def: &Def,
     doc_url: Option<String>
 ) -> Vec<MarkedString> {
     debug!("tooltip_function_signature_arg: {}", def.name);
@@ -349,7 +349,7 @@ fn tooltip_function_signature_arg(
 }
 
 fn tooltip_static_const_decl(
-    vfs: &Vfs, 
+    vfs: &Vfs,
     def: &Def, doc_url: Option<String>
 ) -> Vec<MarkedString> {
     debug!("tooltip_static_const_decl: {}", def.name);
@@ -390,7 +390,7 @@ where
         .unwrap()
 }
 
-/// Creates a tooltip using the function, type or other declaration and 
+/// Creates a tooltip using the function, type or other declaration and
 /// optional doc URL, context, or markdown documentation. No additional
 /// processing or formatting is performed.
 fn create_tooltip(
@@ -422,7 +422,7 @@ struct RacerDef {
 }
 
 /// Extracts the documentation and type information using racer.
-/// 
+///
 /// The type will be formatted according to the racer match and
 /// the documentation will be processed.
 fn racer(vfs: Arc<Vfs>, fmt_config: FmtConfig, span: &Span<ZeroIndexed>) -> Option<RacerDef> {
@@ -442,7 +442,7 @@ fn racer(vfs: Arc<Vfs>, fmt_config: FmtConfig, span: &Span<ZeroIndexed>) -> Opti
         });
 
     debug!("racer: name: {:?}", name);
-    
+
     let results = ::std::panic::catch_unwind(move || {
         let cache = racer::FileCache::new(vfs);
         let session = racer::Session::new(&cache);
@@ -502,7 +502,7 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
     debug!("format_object: {}", the_type);
     let config = fmt_config.get_rustfmt_config();
     let trimmed = the_type.trim();
-    
+
     // Normalize the ending for rustfmt
     let object = if trimmed.ends_with(")") {
         format!("{};", trimmed)
@@ -615,7 +615,7 @@ fn format_method(fmt_config: &FmtConfig, the_type: String) -> String {
 }
 
 /// Builds a hover tooltip composed of the function signature or type decleration, doc URL
-/// (if available in the save-analysis), source extracted documentation, and code context 
+/// (if available in the save-analysis), source extracted documentation, and code context
 /// for local variables.
 pub fn tooltip(
     ctx: &InitActionContext,
@@ -710,19 +710,20 @@ pub fn tooltip(
 pub mod test {
     use super::*;
 
-    use analysis;
-    use build::BuildPriority;
-    use config;
-    use lsp_data::{ClientCapabilities, InitializationOptions};
-    use ls_types::{TextDocumentPositionParams, TextDocumentIdentifier, Position};
+    use rls_analysis as analysis;
+    use crate::build::BuildPriority;
+    use crate::config;
+    use crate::lsp_data::{ClientCapabilities, InitializationOptions};
+    use crate::lsp_data::{TextDocumentPositionParams, TextDocumentIdentifier, Position};
     use serde_json as json;
-    use server::{Output, RequestId};
+    use crate::server::{Output, RequestId};
     use url::Url;
-    
+
     use std::fs;
     use std::path::PathBuf;
     use std::process;
     use std::sync::Mutex;
+    use std::env;
 
     #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
     pub struct Test {
@@ -764,9 +765,9 @@ pub mod test {
             };
             let ms_clone = |ms: &MarkedString| {
                 match ms {
-                    MarkedString::String(ref s) => 
+                    MarkedString::String(ref s) =>
                         MarkedString::String(s.clone()),
-                    MarkedString::LanguageString(ref ls) => 
+                    MarkedString::LanguageString(ref ls) =>
                         MarkedString::LanguageString(ls_clone(ls))
                 }
             };
@@ -806,7 +807,7 @@ pub mod test {
             let position = Position::new(self.line - 1u64, self.col - 1u64);
             let params = TextDocumentPositionParams::new(doc_id, position);
             let result = tooltip(&ctx, &params).map_err(|e| format!("tooltip error: {:?}", e));
-            
+
             TestResult {
                 test: self.clone(),
                 data: result,
@@ -862,6 +863,7 @@ pub mod test {
     pub struct TooltipTestHarness {
         ctx: InitActionContext,
         project_dir: PathBuf,
+        working_dir: PathBuf,
     }
 
     impl TooltipTestHarness {
@@ -879,20 +881,31 @@ pub mod test {
                 related_information_support: true
             };
             let mut config = config::Config::default();
-            config
-                .infer_defaults(&project_dir)
-                .expect("config::infer_defaults failed");
+            let cur_dir = env::current_dir().unwrap();
+            let target_dir = env::var("CARGO_TARGET_DIR")
+                .map(|s| Path::new(&s).to_owned())
+                .unwrap_or_else(|_| {
+                    cur_dir.join("target")
+                });
+
+            let working_dir = target_dir
+                .join("tests")
+                .join("hover")
+                .join("working_dir");
+
+            config.target_dir = config::Inferrable::Specified(Some(working_dir.clone()));
+
             let config = Arc::new(Mutex::new(config));
             let analysis = Arc::new(analysis::AnalysisHost::new(analysis::Target::Debug));
             let vfs = Arc::new(Vfs::new());
 
             let ctx = InitActionContext::new(
-                analysis.clone(), 
-                vfs.clone(), 
-                config.clone(), 
-                client_caps, 
-                project_dir.clone(), 
-                pid, 
+                analysis.clone(),
+                vfs.clone(),
+                config.clone(),
+                client_caps,
+                project_dir.clone(),
+                pid,
                 true
             );
 
@@ -902,7 +915,8 @@ pub mod test {
 
             TooltipTestHarness {
                 ctx,
-                project_dir
+                project_dir,
+                working_dir,
             }
         }
 
@@ -913,12 +927,11 @@ pub mod test {
         /// line number, and column. The execution will return an `Err` if either the save or
         /// load directories do not exist nor could be created.
         pub fn run_tests(
-            &self, 
-            tests: &Vec<Test>, 
-            load_dir: PathBuf, 
+            &self,
+            tests: &Vec<Test>,
+            load_dir: PathBuf,
             save_dir: PathBuf,
-        ) -> Result<Vec<TestFailure>, String>
-        {
+        ) -> Result<Vec<TestFailure>, String> {
             fs::create_dir_all(&load_dir).map_err(|e|
                 format!("load_dir does not exist and could not be created: {:?} ({:?})", load_dir, e)
             )?;
@@ -989,6 +1002,15 @@ pub mod test {
         }
     }
 
+    impl Drop for TooltipTestHarness {
+        fn drop(&mut self) {
+            if fs::metadata(&self.working_dir).is_ok() {
+                fs::remove_dir_all(&self.working_dir)
+                    .expect("failed to tidy up");
+            }
+        }
+    }
+
     /// Strips indentation from string literals by examining
     /// the indent of the first non-empty line. Preceeding
     /// and trailing whitespace is also removed.
@@ -1035,7 +1057,7 @@ pub mod test {
         assert_eq!("Hello, world ! ! !\nThe next line\n    Indented line\nLast line", &lines);
 
         let lines = noindent("
-        
+
                 Hello, world ! ! !
                 The next line
                     Indented line
@@ -1242,9 +1264,9 @@ pub mod test {
         assert_eq!(expected, result, "method with type parameters");
 
         let input = noindent("   fn foo<T>(
-                    &self, 
-            t: T) 
-                where 
+                    &self,
+            t: T)
+                where
             T: Copy
 
         ");
@@ -1383,47 +1405,47 @@ pub mod test {
 
         let input = "pub struct Box<T: ?Sized>(Unique<T>);";
         let result = format_object(config, input.into());
-        assert_eq!("pub struct Box<T: ?Sized>", &result, 
+        assert_eq!("pub struct Box<T: ?Sized>", &result,
             "tuple struct with all private fields has hidden components");
 
         let input = "pub struct Thing(pub u32);";
         let result = format_object(config, input.into());
-        assert_eq!("pub struct Thing(pub u32)", &result, 
+        assert_eq!("pub struct Thing(pub u32)", &result,
             "tuple struct with trailing ';' from racer");
 
         let input = "pub struct Thing(pub u32)";
         let result = format_object(config, input.into());
-        assert_eq!("pub struct Thing(pub u32)", &result, 
+        assert_eq!("pub struct Thing(pub u32)", &result,
             "pub tuple struct");
 
         let input = "pub struct Thing(pub u32, i32)";
         let result = format_object(config, input.into());
-        assert_eq!("pub struct Thing(pub u32, _)", &result, 
+        assert_eq!("pub struct Thing(pub u32, _)", &result,
             "non-pub components of pub tuples should be hidden");
 
         let input = "struct Thing(u32, i32)";
         let result = format_object(config, input.into());
-        assert_eq!("struct Thing(u32, i32)", &result, 
+        assert_eq!("struct Thing(u32, i32)", &result,
             "private tuple struct may show private components");
 
         let input = "pub struct Thing<T: Copy>";
         let result = format_object(config, input.into());
-        assert_eq!("pub struct Thing<T: Copy>", &result, 
+        assert_eq!("pub struct Thing<T: Copy>", &result,
             "pub struct");
 
         let input = "pub struct Thing<T: Copy> {";
         let result = format_object(config, input.into());
-        assert_eq!("pub struct Thing<T: Copy>", &result, 
+        assert_eq!("pub struct Thing<T: Copy>", &result,
             "pub struct with trailing '{{' from racer");
 
         let input = "pub struct Thing { x: i32 }";
         let result = format_object(config, input.into());
-        assert_eq!("pub struct Thing", &result, 
+        assert_eq!("pub struct Thing", &result,
             "pub struct with body");
 
         let input = "pub enum Foobar { Foo, Bar }";
         let result = format_object(config, input.into());
-        assert_eq!("pub enum Foobar", &result, 
+        assert_eq!("pub enum Foobar", &result,
             "pub enum with body");
 
         let input = "pub trait Thing<T, U> where T: Copy + Sized, U: Clone";
@@ -1434,7 +1456,7 @@ pub mod test {
                 U: Clone,
         ");
         let result = format_object(config, input.into());
-        assert_eq!(expected, result, 
+        assert_eq!(expected, result,
             "trait with where clause");
     }
 
@@ -1454,7 +1476,7 @@ pub mod test {
             tincidunt tristique maximus. Sed venenatis urna vel sagittis tempus.
             In hac habitasse platea dictumst.
 
-            End module docs. 
+            End module docs.
         ");
 
         assert_eq!(expected, actual, "module docs without a copyright header");
@@ -1476,7 +1498,7 @@ pub mod test {
             Nam efficitur dapibus lectus consequat porta. Pellentesque augue metus,
             vestibulum nec massa at, aliquet consequat ex.
 
-            End of spawn docs    
+            End of spawn docs
         ");
 
         assert_eq!(expected, actual);
@@ -1498,7 +1520,7 @@ pub mod test {
             iaculis ante non, ultricies nulla. Nam ultrices convallis ex, vel
             lacinia est rhoncus sed. Nullam sollicitudin finibus ex at placerat.
 
-            End empty line before decl. 
+            End empty line before decl.
         ");
 
         assert_eq!(expected, actual);
@@ -1581,7 +1603,7 @@ pub mod test {
     }
 
     #[test]
-    fn test_tooltip() -> Result<(), Box<::std::error::Error>> {
+    fn test_tooltip() -> Result<(), Box<dyn std::error::Error>> {
         use self::test::{TooltipTestHarness, LineOutput, Test};
         use std::env;
 
@@ -1648,9 +1670,9 @@ pub mod test {
         let cwd = env::current_dir()?;
         let out = LineOutput::default();
         let proj_dir = cwd.join("test_data").join("hover");
-        let save_dir = cwd.join("target").join("hover").join("save_data");
+        let save_dir = cwd.join("target").join("tests").join("hover").join("save_data");
         let load_dir = proj_dir.join("save_data");
-        
+
         let harness = TooltipTestHarness::new(proj_dir, &out);
 
         out.reset();
