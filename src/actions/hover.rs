@@ -1,13 +1,14 @@
-use crate::actions::requests::racer_coord;
 use crate::actions::InitActionContext;
-use rls_analysis::{Def, DefKind};
+use crate::actions::requests::racer_coord;
 use crate::config::FmtConfig;
 use crate::lsp_data::*;
-use racer;
-use rustfmt_nightly::{self as rustfmt, Input as FmtInput};
 use crate::server::ResponseError;
+
+use racer;
+use rls_analysis::{Def, DefKind};
 use rls_span::{Span, ZeroIndexed, Row};
 use rls_vfs::{self as vfs, Vfs};
+use rustfmt_nightly::{self as rustfmt, Input as FmtInput};
 
 use std::path::Path;
 use std::sync::Arc;
