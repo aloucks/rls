@@ -87,3 +87,10 @@ fn foo() {
     bar.foo(Foo::Baz);
     bar.other(Tuple(4, 5.0));
 }
+
+trait Baz {
+    /// Foo copy type
+    type Foo: Copy;
+
+    fn foo() -> Self::Foo;
+}
