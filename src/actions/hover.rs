@@ -245,7 +245,11 @@ pub fn extract_decl(
     Ok(lines)
 }
 
-fn tooltip_local_variable_usage(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_local_variable_usage(
+    ctx: &InitActionContext,
+    def: &Def,
+    doc_url: Option<String>,
+) -> Vec<MarkedString> {
     debug!("tooltip_local_variable_usage: {}", def.name);
     let vfs = ctx.vfs.clone();
 
@@ -284,7 +288,11 @@ fn tooltip_type(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> 
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_field_or_variant(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_field_or_variant(
+    ctx: &InitActionContext,
+    def: &Def,
+    doc_url: Option<String>,
+) -> Vec<MarkedString> {
     debug!("tooltip_field_or_variant: {}", def.name);
 
     let vfs = ctx.vfs.clone();
@@ -380,7 +388,11 @@ fn tooltip_local_variable_decl(
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_function_arg_usage(_ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_function_arg_usage(
+    _ctx: &InitActionContext,
+    def: &Def,
+    doc_url: Option<String>,
+) -> Vec<MarkedString> {
     debug!("tooltip_function_arg_usage: {}", def.name);
 
     let the_type = def.value.trim().into();
@@ -404,9 +416,13 @@ fn tooltip_function_signature_arg(
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_static_const_decl(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_static_const_decl(
+    ctx: &InitActionContext,
+    def: &Def,
+    doc_url: Option<String>,
+) -> Vec<MarkedString> {
     debug!("tooltip_static_const_decl: {}", def.name);
-    
+
     let vfs = ctx.vfs.clone();
 
     let the_type = def.value.trim().into();
@@ -741,15 +757,11 @@ pub fn tooltip(
                 DefKind::Enum | DefKind::Union | DefKind::Struct | DefKind::Trait => {
                     tooltip_struct_enum_union_trait(&ctx, &def, doc_url)
                 }
-                DefKind::Function | DefKind::Method => {
-                    tooltip_function_method(&ctx, &def, doc_url)
-                }
+                DefKind::Function | DefKind::Method => tooltip_function_method(&ctx, &def, doc_url),
                 DefKind::Mod => tooltip_mod(&ctx, &def, doc_url),
                 DefKind::Static | DefKind::Const => {
                     // racer generally provides more content here
-                    debug!(
-                        "tooltip: static or const: {}", def.name
-                    );
+                    debug!("tooltip: static or const: {}", def.name);
                     let contents = racer_tooltip();
                     if !contents.is_empty() {
                         contents
@@ -757,9 +769,7 @@ pub fn tooltip(
                         tooltip_static_const_decl(&ctx, &def, doc_url)
                     }
                 }
-                DefKind::Type => {
-                    tooltip_type(&ctx, &def, doc_url)
-                }
+                DefKind::Type => tooltip_type(&ctx, &def, doc_url),
                 _ => {
                     debug!(
                         "tooltip: ignoring def: \
@@ -800,7 +810,7 @@ pub mod test {
     use std::fs;
     use std::path::PathBuf;
     use std::process;
-    use std::sync::{Arc, Mutex};    
+    use std::sync::{Arc, Mutex};
 
     #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
     pub struct Test {
