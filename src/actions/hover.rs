@@ -11,7 +11,6 @@ use rls_vfs::{self as vfs, Vfs};
 use rustfmt_nightly::{self as rustfmt, Input as FmtInput};
 
 use std::path::Path;
-use std::sync::Arc;
 
 /// Cleanup documentation code blocks. The `docs` are expected to have
 /// the preceeding `///` or `//!` prefixes already trimmed away. Rust code
@@ -246,20 +245,24 @@ pub fn extract_decl(
     Ok(lines)
 }
 
-fn tooltip_local_variable_usage(vfs: &Vfs, _fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_local_variable_usage(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
     debug!("tooltip_local_variable_usage: {}", def.name);
+    let vfs = ctx.vfs.clone();
+
     let the_type = def.value.trim().into();
     let mut context = String::new();
-    match vfs.load_line(&def.span.file, def.span.range.row_start) {
-        Ok(line) => {
-            context.push_str(line.trim());
+    if ctx.config.lock().unwrap().show_hover_context {
+        match vfs.load_line(&def.span.file, def.span.range.row_start) {
+            Ok(line) => {
+                context.push_str(line.trim());
+            }
+            Err(e) => {
+                error!("tooltip_local_variable_usage: error = {:?}", e);
+            }
         }
-        Err(e) => {
-            error!("local_variable_usage: error = {:?}", e);
+        if context.ends_with('{') {
+            context.push_str(" ... }");
         }
-    }
-    if context.ends_with('{') {
-        context.push_str(" ... }");
     }
 
     let context = empty_to_none(context);
@@ -268,33 +271,40 @@ fn tooltip_local_variable_usage(vfs: &Vfs, _fmt_config: &FmtConfig, def: &Def, d
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_type(vfs: &Vfs, _fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_type(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
     debug!("tooltip_type: {}", def.name);
+
+    let vfs = ctx.vfs.clone();
+
     let the_type = || def.value.trim().into();
-    let the_type = def_decl(def, vfs, the_type);
-    let docs = def_docs(def, vfs);
+    let the_type = def_decl(def, &vfs, the_type);
+    let docs = def_docs(def, &vfs);
     let context = None;
 
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_field_or_variant(vfs: &Vfs, _fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_field_or_variant(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
     debug!("tooltip_field_or_variant: {}", def.name);
 
+    let vfs = ctx.vfs.clone();
+
     let the_type = def.value.trim().into();
-    let docs = def_docs(def, vfs);
+    let docs = def_docs(def, &vfs);
     let context = None;
 
     create_tooltip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_struct_enum_union_trait(
-    vfs: &Vfs,
-    fmt_config: &FmtConfig,
+    ctx: &InitActionContext,
     def: &Def,
     doc_url: Option<String>,
 ) -> Vec<MarkedString> {
     debug!("tooltip_struct_enum_union_trait: {}", def.name);
+
+    let vfs = ctx.vfs.clone();
+    let fmt_config = ctx.fmt_config();
 
     // fallback in case source extration fails
     let the_type = || match def.kind {
@@ -305,35 +315,39 @@ fn tooltip_struct_enum_union_trait(
         _ => def.value.trim().to_string(),
     };
 
-    let decl = def_decl(def, vfs, the_type);
+    let decl = def_decl(def, &vfs, the_type);
 
-    let the_type = format_object(fmt_config, decl);
-    let docs = def_docs(def, vfs);
+    let the_type = format_object(&fmt_config, decl);
+    let docs = def_docs(def, &vfs);
     let context = None;
 
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_mod(vfs: &Vfs, _fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_mod(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
     debug!("tooltip_mod: name: {}", def.name);
+
+    let vfs = ctx.vfs.clone();
 
     let the_type = def.value.trim();
     let the_type = the_type.replace("\\\\", "/");
     let the_type = the_type.replace("\\", "/");
 
-    let docs = def_docs(def, vfs);
+    let docs = def_docs(def, &vfs);
     let context = None;
 
     create_tooltip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_function_method(
-    vfs: &Vfs,
-    fmt_config: &FmtConfig,
+    ctx: &InitActionContext,
     def: &Def,
     doc_url: Option<String>,
 ) -> Vec<MarkedString> {
     debug!("tooltip_function_method: {}", def.name);
+
+    let vfs = ctx.vfs.clone();
+    let fmt_config = ctx.fmt_config();
 
     let the_type = || {
         def.value
@@ -343,18 +357,17 @@ fn tooltip_function_method(
             .replace("->(", "-> (")
     };
 
-    let decl = def_decl(def, vfs, the_type);
+    let decl = def_decl(def, &vfs, the_type);
 
-    let the_type = format_method(fmt_config, decl);
+    let the_type = format_method(&fmt_config, decl);
+    let docs = def_docs(def, &vfs);
     let context = None;
-    let docs = def_docs(def, vfs);
 
     create_tooltip(the_type, doc_url, context, docs)
 }
 
 fn tooltip_local_variable_decl(
-    _vfs: &Vfs,
-    _fmt_config: &FmtConfig,
+    _ctx: &InitActionContext,
     def: &Def,
     doc_url: Option<String>,
 ) -> Vec<MarkedString> {
@@ -367,7 +380,7 @@ fn tooltip_local_variable_decl(
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_function_arg_usage(_vfs: &Vfs, _fmt_config: &FmtConfig, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_function_arg_usage(_ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
     debug!("tooltip_function_arg_usage: {}", def.name);
 
     let the_type = def.value.trim().into();
@@ -378,7 +391,7 @@ fn tooltip_function_arg_usage(_vfs: &Vfs, _fmt_config: &FmtConfig, def: &Def, do
 }
 
 fn tooltip_function_signature_arg(
-    _vfs: &Vfs,
+    _ctx: &InitActionContext,
     def: &Def,
     doc_url: Option<String>,
 ) -> Vec<MarkedString> {
@@ -391,11 +404,13 @@ fn tooltip_function_signature_arg(
     create_tooltip(the_type, doc_url, context, docs)
 }
 
-fn tooltip_static_const_decl(vfs: &Vfs, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
+fn tooltip_static_const_decl(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> Vec<MarkedString> {
     debug!("tooltip_static_const_decl: {}", def.name);
+    
+    let vfs = ctx.vfs.clone();
 
     let the_type = def.value.trim().into();
-    let docs = def_docs(def, vfs);
+    let docs = def_docs(def, &vfs);
     let context = None;
 
     create_tooltip(the_type, doc_url, context, docs)
@@ -465,7 +480,17 @@ struct RacerDef {
 ///
 /// The type will be formatted according to the racer match and
 /// the documentation will be processed.
-fn racer(vfs: Arc<Vfs>, fmt_config: FmtConfig, span: &Span<ZeroIndexed>) -> Option<RacerDef> {
+fn racer(ctx: &InitActionContext, span: &Span<ZeroIndexed>) -> Option<RacerDef> {
+    let enabled = ctx.config.lock().unwrap().racer_completion;
+    debug!("racer: enabled: {}", enabled);
+
+    if !enabled {
+        return None;
+    }
+
+    let vfs = ctx.vfs.clone();
+    let fmt_config = ctx.fmt_config();
+
     let file_path = &span.file;
 
     if !file_path.as_path().exists() {
@@ -681,66 +706,59 @@ pub fn tooltip(
 
     let doc_url = analysis.doc_url(&hover_span).ok();
 
-    let vfs = ctx.vfs.clone();
-    let fmt_config = ctx.fmt_config();
-
     let racer_tooltip = || {
-        let racer_enabled = ctx.config.lock().unwrap().racer_completion;
-        debug!("tooltip: racer enabled: {}", racer_enabled);
-        if !racer_enabled {
-            Vec::default()
-        } else if let Some(racer_def) = racer(vfs.clone(), ctx.fmt_config(), &hover_span) {
+        debug!("toolip: attempting with racer");
+        if let Some(racer_def) = racer(&ctx, &hover_span) {
             let docs = empty_to_none(racer_def.docs.unwrap_or(hover_span_doc));
             let the_type = racer_def.decl_or_context.unwrap_or(hover_span_typ);
             let context = None;
             let doc_url = None;
             create_tooltip(the_type, doc_url, context, docs)
         } else {
-            debug!("tooltip: racer returned: None");
+            debug!("tooltip: racer returned an empty result");
             Vec::default()
         }
     };
 
     let contents = if let Ok(def) = hover_span_def {
         if def.kind == DefKind::Local && def.span == hover_span && def.qualname.contains('$') {
-            tooltip_local_variable_decl(&vfs, &fmt_config, &def, doc_url)
+            tooltip_local_variable_decl(&ctx, &def, doc_url)
         } else if def.kind == DefKind::Local
             && def.span != hover_span
             && !def.qualname.contains('$')
         {
-            tooltip_function_arg_usage(&vfs, &fmt_config, &def, doc_url)
+            tooltip_function_arg_usage(&ctx, &def, doc_url)
         } else if def.kind == DefKind::Local && def.span != hover_span && def.qualname.contains('$')
         {
-            tooltip_local_variable_usage(&vfs, &fmt_config, &def, doc_url)
+            tooltip_local_variable_usage(&ctx, &def, doc_url)
         } else if def.kind == DefKind::Local && def.span == hover_span {
-            tooltip_function_signature_arg(&vfs, &def, doc_url)
+            tooltip_function_signature_arg(&ctx, &def, doc_url)
         } else {
             match def.kind {
                 DefKind::TupleVariant | DefKind::StructVariant | DefKind::Field => {
-                    tooltip_field_or_variant(&vfs, &fmt_config, &def, doc_url)
+                    tooltip_field_or_variant(&ctx, &def, doc_url)
                 }
                 DefKind::Enum | DefKind::Union | DefKind::Struct | DefKind::Trait => {
-                    tooltip_struct_enum_union_trait(&vfs, &fmt_config, &def, doc_url)
+                    tooltip_struct_enum_union_trait(&ctx, &def, doc_url)
                 }
                 DefKind::Function | DefKind::Method => {
-                    tooltip_function_method(&vfs, &fmt_config, &def, doc_url)
+                    tooltip_function_method(&ctx, &def, doc_url)
                 }
-                DefKind::Mod => tooltip_mod(&vfs, &fmt_config, &def, doc_url),
+                DefKind::Mod => tooltip_mod(&ctx, &def, doc_url),
                 DefKind::Static | DefKind::Const => {
                     // racer generally provides more content here
                     debug!(
-                        "tooltip: static or const (attempting racer first): {}",
-                        def.name
+                        "tooltip: static or const: {}", def.name
                     );
                     let contents = racer_tooltip();
                     if !contents.is_empty() {
                         contents
                     } else {
-                        tooltip_static_const_decl(&vfs, &def, doc_url)
+                        tooltip_static_const_decl(&ctx, &def, doc_url)
                     }
                 }
                 DefKind::Type => {
-                    tooltip_type(&vfs, &fmt_config, &def, doc_url)
+                    tooltip_type(&ctx, &def, doc_url)
                 }
                 _ => {
                     debug!(
@@ -758,7 +776,7 @@ pub fn tooltip(
             }
         }
     } else {
-        debug!("tooltip: def is empty (using racer)");
+        debug!("tooltip: def is empty");
         racer_tooltip()
     };
 
@@ -782,7 +800,7 @@ pub mod test {
     use std::fs;
     use std::path::PathBuf;
     use std::process;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};    
 
     #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
     pub struct Test {

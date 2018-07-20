@@ -137,6 +137,8 @@ and the following unstable options:
   first paragraph is recorded. This option _currently_ has little to no effect on
   hover tooltips. The save-analysis docs are only used if source extraction fails.
   This option has no effect on the standard library.
+* `show_hover_context` show additional context in hover tooltips when available.
+  This is often the local variable declaration. When set to false the content is only availabe when holding the `ctrl` key in some editors.
 
 
 ## Troubleshooting

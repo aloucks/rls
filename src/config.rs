@@ -151,6 +151,10 @@ pub struct Config {
     /// are used in the event that source extraction fails. This may prove to be more useful 
     /// in the future.
     pub full_docs: Inferrable<bool>,
+    /// Show additional context in hover tooltips when available. This is often the type
+    /// local variable declaration. When set to false, the content is only availabe when
+    /// holding the `ctrl` key in some editors.
+    pub show_hover_context: bool,
 }
 
 impl Default for Config {
@@ -178,6 +182,7 @@ impl Default for Config {
             racer_completion: true,
             clippy_preference: ClippyPreference::OptIn,
             full_docs: Inferrable::Inferred(false),
+            show_hover_context: true,
         };
         result.normalise();
         result
