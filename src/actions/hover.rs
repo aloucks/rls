@@ -531,6 +531,41 @@ fn skip_path_components<P: AsRef<Path>>(
     }
 }
 
+/// Collapse parent directory references inside of paths.
+/// 
+/// # Example
+/// 
+/// ```
+/// # use std::path::PathBuf;
+/// 
+/// let path = PathBuf::from("libstd/../liballoc/string.rs");
+/// let collapsed = collapse_parents(path);
+/// let expected = PathBuf::from("liballoc/string.rs");
+/// assert_eq!(expected, collapsed);
+/// ```
+fn collapse_parents(path: PathBuf) -> PathBuf {
+    use std::path::Component;
+    let mut components = Vec::new();
+    let mut skip;
+    let mut skip_prev = false;
+    for comp in path.components().rev() {
+        if comp == Component::ParentDir {
+            skip = true;
+        } else {
+            skip = false;
+        }
+        if !skip && !skip_prev {
+            components.insert(0, comp);
+        }
+        skip_prev = skip;
+    }
+
+    components.iter().fold(PathBuf::new(), |mut path, comp| {
+        path.push(comp);
+        path
+    })
+}
+
 /// Converts a racer `Match` to a save-analysis `Def`. Returns
 /// `None` if the coordinates are not available on the match.
 fn racer_match_to_def(ctx: &InitActionContext, m: &racer::Match) -> Option<Def> {
@@ -563,23 +598,37 @@ fn racer_match_to_def(ctx: &InitActionContext, m: &racer::Match) -> Option<Def> 
             .unwrap_or_else(|_| PathBuf::new());
 
         let contextstr = m.contextstr.replacen("\\\\?\\", "", 1);
-        let contextstr_path = Path::new(&contextstr);
+
+        eprintln!();
+        eprintln!("home:                      {:?}", home);
+        eprintln!("current_project:           {:?}", ctx.current_project);
+
+        let contextstr_path = PathBuf::from(&contextstr);
+        eprintln!("contextstr_path:           {:?}", contextstr_path);
+
+        let contextstr_path = collapse_parents(contextstr_path);
+        eprintln!("contextstr_path_collapsed: {:?}", contextstr_path);
 
         // Tidy up the module path
         contextstr_path
             // Strip current project dir prefix
             .strip_prefix(&ctx.current_project)
             // Strip home directory prefix
-            .or_else(|_| contextstr_path.strip_prefix(&home))
+            .or_else(|_| {
+                let path = contextstr_path.strip_prefix(&home);
+                eprintln!("stripped_home_prefix: {:?}", path);
+                path
+            })
             .ok()
             .map(|path| path.to_path_buf())
             .map(|path| skip_path_components(path, ".rustup", 8))
             .map(|path| skip_path_components(path, ".cargo", 4))
             .and_then(|path| path.to_str().map(|s| s.to_string()))
-            .unwrap_or_else(|| m.contextstr.to_string())
+            .unwrap_or_else(|| contextstr.to_string())
     } else {
         m.contextstr.trim_right_matches('{').trim().to_string()
     };
+    eprintln!("contextstr:                {:?}", contextstr);
 
     let filepath = m.filepath.clone();
     let matchstr = m.matchstr.clone();
