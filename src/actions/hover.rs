@@ -344,10 +344,20 @@ fn tooltip_mod(ctx: &InitActionContext, def: &Def, doc_url: Option<String>) -> V
     let the_type = the_type.replace("\\\\", "/");
     let the_type = the_type.replace("\\", "/");
 
+    let mod_path = if let Some(dir) = ctx.current_project.file_name() {
+        if Path::new(&the_type).starts_with(dir) {
+            the_type.chars().skip(dir.len() + 1).collect()
+        } else {
+            the_type
+        }
+    } else {
+        the_type
+    };
+
     let docs = def_docs(def, &vfs);
     let context = None;
 
-    create_tooltip(the_type, doc_url, context, docs)
+    create_tooltip(mod_path, doc_url, context, docs)
 }
 
 fn tooltip_function_method(
