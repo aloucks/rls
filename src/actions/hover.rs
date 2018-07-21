@@ -542,12 +542,12 @@ fn skip_path_components<P: AsRef<Path>>(
 }
 
 /// Collapse parent directory references inside of paths.
-/// 
+///
 /// # Example
-/// 
+///
 /// ```
 /// # use std::path::PathBuf;
-/// 
+///
 /// let path = PathBuf::from("libstd/../liballoc/string.rs");
 /// let collapsed = collapse_parents(path);
 /// let expected = PathBuf::from("liballoc/string.rs");
@@ -608,27 +608,15 @@ fn racer_match_to_def(ctx: &InitActionContext, m: &racer::Match) -> Option<Def> 
             .unwrap_or_else(|_| PathBuf::new());
 
         let contextstr = m.contextstr.replacen("\\\\?\\", "", 1);
-
-        eprintln!();
-        eprintln!("home:                      {:?}", home);
-        eprintln!("current_project:           {:?}", ctx.current_project);
-
         let contextstr_path = PathBuf::from(&contextstr);
-        eprintln!("contextstr_path:           {:?}", contextstr_path);
-
         let contextstr_path = collapse_parents(contextstr_path);
-        eprintln!("contextstr_path_collapsed: {:?}", contextstr_path);
 
         // Tidy up the module path
         contextstr_path
             // Strip current project dir prefix
             .strip_prefix(&ctx.current_project)
             // Strip home directory prefix
-            .or_else(|_| {
-                let path = contextstr_path.strip_prefix(&home);
-                eprintln!("stripped_home_prefix: {:?}", path);
-                path
-            })
+            .or_else(|_| contextstr_path.strip_prefix(&home))
             .ok()
             .map(|path| path.to_path_buf())
             .map(|path| skip_path_components(path, ".rustup", 8))
@@ -638,7 +626,6 @@ fn racer_match_to_def(ctx: &InitActionContext, m: &racer::Match) -> Option<Def> 
     } else {
         m.contextstr.trim_right_matches('{').trim().to_string()
     };
-    eprintln!("contextstr:                {:?}", contextstr);
 
     let filepath = m.filepath.clone();
     let matchstr = m.matchstr.clone();
