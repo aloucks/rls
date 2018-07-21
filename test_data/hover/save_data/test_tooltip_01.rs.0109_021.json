@@ -1,16 +1,16 @@
 {
   "test": {
     "file": "test_tooltip_01.rs",
-    "line": 95,
-    "col": 25
+    "line": 109,
+    "col": 21
   },
   "data": {
     "Ok": [
       {
         "language": "rust",
-        "value": "type Foo: Other"
+        "value": "const FOO: &'static str = \"FOO\""
       },
-      "Foo other type"
+      "The constant FOO"
     ]
   }
 }

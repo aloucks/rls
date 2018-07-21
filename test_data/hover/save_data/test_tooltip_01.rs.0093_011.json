@@ -1,8 +1,8 @@
 {
   "test": {
     "file": "test_tooltip_01.rs",
-    "line": 95,
-    "col": 25
+    "line": 93,
+    "col": 11
   },
   "data": {
     "Ok": [

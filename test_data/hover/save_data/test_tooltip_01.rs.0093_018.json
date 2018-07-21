@@ -1,16 +1,16 @@
 {
   "test": {
     "file": "test_tooltip_01.rs",
-    "line": 95,
-    "col": 25
+    "line": 93,
+    "col": 18
   },
   "data": {
     "Ok": [
       {
         "language": "rust",
-        "value": "type Foo: Other"
+        "value": "trait Other"
       },
-      "Foo other type"
+      "The other trait"
     ]
   }
 }

@@ -1,16 +1,16 @@
 {
   "test": {
     "file": "test_tooltip_01.rs",
-    "line": 95,
-    "col": 25
+    "line": 113,
+    "col": 21
   },
   "data": {
     "Ok": [
       {
         "language": "rust",
-        "value": "type Foo: Other"
+        "value": "static BAR: u32 = 123"
       },
-      "Foo other type"
+      "The static BAR"
     ]
   }
 }

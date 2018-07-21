@@ -7,11 +7,18 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
+
+//! Begin module docs
+//! 
+//! Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas
+//! tincidunt tristique maximus. Sed venenatis urna vel sagittis tempus.
+//! In hac habitasse platea dictumst.
+//! 
+//! End module docs.
+
 #![allow(dead_code, unused_imports)]
 
-extern crate fnv;
-
-pub mod test_tooltip_01;
-pub mod test_tooltip_mod;
-pub mod test_tooltip_mod_use;
-pub mod test_tooltip_std;
+/// Begin first item docs
+/// 
+/// The first item docs should not pick up the module docs.
+struct First;

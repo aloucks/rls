@@ -7,11 +7,9 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
-#![allow(dead_code, unused_imports)]
 
-extern crate fnv;
+use fnv;
+use fnv::FnvHasher;
 
-pub mod test_tooltip_01;
-pub mod test_tooltip_mod;
-pub mod test_tooltip_mod_use;
-pub mod test_tooltip_std;
+use std::sync;
+use std::sync::Arc;

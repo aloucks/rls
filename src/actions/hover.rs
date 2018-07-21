@@ -1,4 +1,4 @@
-use crate::actions::requests::racer_coord;
+use crate::actions::requests;
 use crate::actions::InitActionContext;
 use crate::config::FmtConfig;
 use crate::lsp_data::*;
@@ -6,11 +6,11 @@ use crate::server::ResponseError;
 
 use racer;
 use rls_analysis::{Def, DefKind};
-use rls_span::{Row, Span, ZeroIndexed};
+use rls_span::{Column, Row, Span, ZeroIndexed};
 use rls_vfs::{self as vfs, Vfs};
 use rustfmt_nightly::{self as rustfmt, Input as FmtInput};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Cleanup documentation code blocks. The `docs` are expected to have
 /// the preceeding `///` or `//!` prefixes already trimmed away. Rust code
@@ -46,7 +46,8 @@ pub fn process_docs(docs: &str) -> String {
         // Racer sometimes pulls out comment block headers from the standard library
         let ignore_slashes = line.starts_with("////");
 
-        let is_attribute = trimmed.starts_with("#[") && in_rust_codeblock;
+        let maybe_attribute = trimmed.starts_with("#[") || trimmed.starts_with("#![");
+        let is_attribute = maybe_attribute && in_rust_codeblock;
         let is_hidden = trimmed.starts_with('#') && in_rust_codeblock && !is_attribute;
 
         let ignore_whitespace = last_line_ignored && trimmed.is_empty();
@@ -103,14 +104,16 @@ pub fn extract_docs(
 
         let line = line.trim();
 
-        if line.starts_with("#[") && line.ends_with(']') && !hit_top {
+        let attr_start = line.starts_with("#[") || line.starts_with("#![");
+
+        if attr_start && line.ends_with(']') && !hit_top {
             // Ignore single line attributes
             continue;
         }
 
         // Continue with the next line when transitioning out of a
         // multi-line attribute
-        if line.starts_with("#[") || (line.ends_with(']') && !line.starts_with("//")) {
+        if attr_start || (line.ends_with(']') && !line.starts_with("//")) {
             in_meta = !in_meta;
             if !in_meta && !hit_top {
                 continue;
@@ -196,7 +199,7 @@ pub fn extract_docs(
 }
 
 fn extract_and_process_docs(vfs: &Vfs, file: &Path, row_start: Row<ZeroIndexed>) -> Option<String> {
-    extract_docs(vfs, file, row_start)
+    extract_docs(vfs, &file, row_start)
         .map_err(|e| {
             error!(
                 "failed to extract docs: row: {:?}, file: {:?} ({:?})",
@@ -426,6 +429,8 @@ fn tooltip_static_const_decl(
     let vfs = ctx.vfs.clone();
 
     let the_type = def.value.trim().into();
+
+    let the_type = def_decl(def, &vfs, || the_type);
     let docs = def_docs(def, &vfs);
     let context = None;
 
@@ -487,30 +492,141 @@ fn create_tooltip(
     tooltip
 }
 
-struct RacerDef {
-    decl_or_context: Option<String>,
-    docs: Option<String>,
+/// Skips `skip_components` from the `path` if the path starts with `prefix`.
+/// Returns the original path if there is no match.
+///
+/// # Examples
+///
+/// ```
+/// # use std::path::Path;
+///
+/// let base_path = Path::from(".rustup/toolchains/nightly-x86_64-pc-windows-msvc/lib/rustlib/src/rust/src/liballoc/string.rs");
+/// let tidy_path = skip_path_components(base_path.to_path_buf(), ".rustup", 8);
+/// assert_eq!("liballoc/string.rs", tidy_path);
+///
+/// let base_path = Path::from(".cargo/registry/src/github.com-1ecc6299db9ec823/smallvec-0.6.2/lib.rs");
+/// let tidy_path = skip_path_components(base_path.to_path_buf(), ".cargo", 4);
+/// assert_eq!("smallvec-0.6.2/lib.rs", tidy_path);
+///
+/// let base_path = Path::from("some/unknown/path/lib.rs");
+/// let tidy_path = skip_path_components(base_path.to_path_buf(), ".rustup", 4);
+/// assert_eq!("some/unknown/path/lib.rs", tidy_path);
+/// ```
+fn skip_path_components<P: AsRef<Path>>(
+    path: PathBuf,
+    prefix: P,
+    skip_components: usize,
+) -> PathBuf {
+    if path.starts_with(prefix) {
+        let comps: PathBuf = path.components().skip(skip_components).fold(
+            PathBuf::new(),
+            |mut comps, comp| {
+                comps.push(comp);
+                comps
+            },
+        );
+        comps
+    } else {
+        path
+    }
+}
+
+/// Converts a racer `Match` to a save-analysis `Def`. Returns
+/// `None` if the coordinates are not available on the match.
+fn racer_match_to_def(ctx: &InitActionContext, m: &racer::Match) -> Option<Def> {
+    use racer::MatchType::*;
+    let kind = match m.mtype {
+        Struct | Impl | TraitImpl => DefKind::Struct,
+        Module => DefKind::Mod,
+        MatchArm => DefKind::Local,
+        Function => DefKind::Function,
+        Crate => DefKind::Mod,
+        Let | IfLet | WhileLet | For => DefKind::Local,
+        StructField => DefKind::Field,
+        Enum => DefKind::Enum,
+        EnumVariant(_) => DefKind::StructVariant,
+        Type => DefKind::Type,
+        FnArg => DefKind::Local,
+        Trait => DefKind::Trait,
+        Const => DefKind::Const,
+        Static => DefKind::Static,
+        Macro => DefKind::Macro,
+        Builtin => DefKind::Macro,
+    };
+
+    let contextstr = if kind == DefKind::Mod {
+        use std::env;
+
+        let home = env::var("HOME")
+            .or_else(|_| env::var("USERPROFILE"))
+            .map(|dir| PathBuf::from(&dir))
+            .unwrap_or_else(|_| PathBuf::new());
+
+        let contextstr = m.contextstr.replacen("\\\\?\\", "", 1);
+        let contextstr_path = Path::new(&contextstr);
+
+        // Tidy up the module path
+        contextstr_path
+            // Strip current project dir prefix
+            .strip_prefix(&ctx.current_project)
+            // Strip home directory prefix
+            .or_else(|_| contextstr_path.strip_prefix(&home))
+            .ok()
+            .map(|path| path.to_path_buf())
+            .map(|path| skip_path_components(path, ".rustup", 8))
+            .map(|path| skip_path_components(path, ".cargo", 4))
+            .and_then(|path| path.to_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| m.contextstr.to_string())
+    } else {
+        m.contextstr.trim_right_matches('{').trim().to_string()
+    };
+
+    let filepath = m.filepath.clone();
+    let matchstr = m.matchstr.clone();
+    let matchstr_len = matchstr.len() as u32;
+    let docs = m.docs.trim().to_string();
+    m.coords.map(|coords| {
+        let (row, col1) = requests::from_racer_coord(coords);
+        let col2 = Column::new_zero_indexed(col1.0 + matchstr_len);
+        let row = Row::new_zero_indexed(row.0 - 1);
+        let span = Span::new(row, row, col1, col2, filepath);
+        let def = Def {
+            kind,
+            span,
+            name: matchstr,
+            value: contextstr,
+            qualname: "".to_string(),
+            distro_crate: false,
+            parent: None,
+            docs,
+        };
+        trace!(
+            "racer_match_to_def: Def {{ kind: {:?}, span: {:?}, name: {:?}, \
+             value: {:?}, qualname: {:?}, distro_crate: {:?}, \
+             parent: {:?}, docs.is_empty: {:?} }}",
+            def.kind,
+            def.span,
+            def.name,
+            def.value,
+            def.qualname,
+            def.distro_crate,
+            def.parent,
+            def.docs.is_empty()
+        );
+        def
+    })
 }
 
 /// Extracts the documentation and type information using racer.
 ///
 /// The type will be formatted according to the racer match and
 /// the documentation will be processed.
-fn racer(ctx: &InitActionContext, span: &Span<ZeroIndexed>) -> Option<RacerDef> {
-    let enabled = ctx.config.lock().unwrap().racer_completion;
-    debug!("racer: enabled: {}", enabled);
-
-    if !enabled {
-        return None;
-    }
-
+fn racer_def(ctx: &InitActionContext, span: &Span<ZeroIndexed>) -> Option<Def> {
     let vfs = ctx.vfs.clone();
-    let fmt_config = ctx.fmt_config();
-
     let file_path = &span.file;
 
     if !file_path.as_path().exists() {
-        error!("racer: skipping non-existant file: {:?}", file_path);
+        error!("racer_def: skipping non-existant file: {:?}", file_path);
         return None;
     }
 
@@ -523,60 +639,36 @@ fn racer(ctx: &InitActionContext, span: &Span<ZeroIndexed>) -> Option<RacerDef> 
             line.get(col_start..col_end).map(|line| line.to_string())
         });
 
-    debug!("racer: name: {:?}", name);
+    debug!("racer_def: name: {:?}", name);
 
     let results = ::std::panic::catch_unwind(move || {
         let cache = racer::FileCache::new(vfs);
         let session = racer::Session::new(&cache);
         let row = span.range.row_end.one_indexed();
-        let coord = racer_coord(row, span.range.col_end);
+        let coord = requests::racer_coord(row, span.range.col_end);
         let location = racer::Location::Coords(coord);
         trace!(
-            "racer: file_path: {:?}, location: {:?}",
+            "racer_def: file_path: {:?}, location: {:?}",
             file_path,
             location
         );
         let matches = racer::complete_from_file(file_path, location, &session);
         matches
             .inspect(|m| {
-                trace!("racer: match: {:?}", m);
+                trace!("racer_def: match: {:?}", m);
             })
             // Remove any matches that don't match the span
             .filter(|m| name.as_ref().map(|name| name == &m.matchstr).unwrap_or(false))
             // Avoid creating tooltip text that is exactly the item being hovered over
             .filter(|m| name.as_ref().map(|name| name != &m.contextstr).unwrap_or(true))
-            .map(|m| {
-                let mut ty = None;
-                let contextstr = m.contextstr.trim_right_matches('{').trim();
-                use racer::MatchType::{Module, Function, Trait, Enum, Struct};
-                match m.mtype {
-                    Module => {
-                        // Ignore
-                    },
-                    Function => {
-                        let the_type = format_method(&fmt_config, contextstr.into());
-                        ty = empty_to_none(the_type.trim().into());
-                    },
-                    Trait | Enum | Struct => {
-                        let the_type = format_object(&fmt_config, contextstr.into());
-                        ty = empty_to_none(the_type.trim().into());
-                    },
-                    _ => {
-                        ty = empty_to_none(contextstr.trim().into());
-                    }
-                }
-                let docs = empty_to_none(process_docs(&m.docs.trim()));
-                debug!("racer: decl_or_context: {:?}, docs.is_some: {}", ty, docs.is_some());
-                RacerDef {
-                    decl_or_context: ty,
-                    docs,
-                }
-            })
+            // The coords are required for the Def
+            .filter(|m| m.coords.is_some())
+            .flat_map(|m| racer_match_to_def(ctx, &m))
             .next()
     });
 
     let results = results.map_err(|_| {
-        error!("racer: racer panicked");
+        error!("racer_def: racer panicked");
     });
 
     results.unwrap_or(None)
@@ -709,32 +801,38 @@ pub fn tooltip(
 
     let hover_file_path = parse_file_path!(&params.text_document.uri, "hover")?;
     let hover_span = ctx.convert_pos_to_span(hover_file_path, params.position);
+    let hover_span_doc = analysis.docs(&hover_span).unwrap_or_else(|_| String::new());
     let hover_span_typ = analysis
         .show_type(&hover_span)
         .unwrap_or_else(|_| String::new());
     let hover_span_def = analysis.id(&hover_span).and_then(|id| analysis.get_def(id));
-    let hover_span_doc = analysis.docs(&hover_span).unwrap_or_else(|_| String::new());
 
     trace!("tooltip: span: {:?}", hover_span);
-    trace!("tooltip: span_def: {:?}", hover_span_def);
-    trace!("tooltip: span_typ: {:?}", hover_span_typ);
     trace!("tooltip: span_doc: {:?}", hover_span_doc);
+    trace!("tooltip: span_typ: {:?}", hover_span_typ);
+    trace!("tooltip: span_def: {:?}", hover_span_def);
+
+    let racer_fallback_enabled = ctx.config.lock().unwrap().racer_completion;
+    debug!(
+        "tooltip: racer_fallback_enabled: {}",
+        racer_fallback_enabled
+    );
+
+    // Fallback to racer if the def was not available and
+    // racer is enabled.
+    let hover_span_def = hover_span_def.or_else(|e| {
+        if racer_fallback_enabled {
+            debug!("tooltip: span_def is empty, attempting with racer");
+            racer_def(&ctx, &hover_span).ok_or_else(|| {
+                debug!("tooltip: racer returned an empty result");
+                e
+            })
+        } else {
+            Err(e)
+        }
+    });
 
     let doc_url = analysis.doc_url(&hover_span).ok();
-
-    let racer_tooltip = || {
-        debug!("toolip: attempting with racer");
-        if let Some(racer_def) = racer(&ctx, &hover_span) {
-            let docs = empty_to_none(racer_def.docs.unwrap_or(hover_span_doc));
-            let the_type = racer_def.decl_or_context.unwrap_or(hover_span_typ);
-            let context = None;
-            let doc_url = None;
-            create_tooltip(the_type, doc_url, context, docs)
-        } else {
-            debug!("tooltip: racer returned an empty result");
-            Vec::default()
-        }
-    };
 
     let contents = if let Ok(def) = hover_span_def {
         if def.kind == DefKind::Local && def.span == hover_span && def.qualname.contains('$') {
@@ -759,16 +857,7 @@ pub fn tooltip(
                 }
                 DefKind::Function | DefKind::Method => tooltip_function_method(&ctx, &def, doc_url),
                 DefKind::Mod => tooltip_mod(&ctx, &def, doc_url),
-                DefKind::Static | DefKind::Const => {
-                    // racer generally provides more content here
-                    debug!("tooltip: static or const: {}", def.name);
-                    let contents = racer_tooltip();
-                    if !contents.is_empty() {
-                        contents
-                    } else {
-                        tooltip_static_const_decl(&ctx, &def, doc_url)
-                    }
-                }
+                DefKind::Static | DefKind::Const => tooltip_static_const_decl(&ctx, &def, doc_url),
                 DefKind::Type => tooltip_type(&ctx, &def, doc_url),
                 _ => {
                     debug!(
@@ -787,9 +876,9 @@ pub fn tooltip(
         }
     } else {
         debug!("tooltip: def is empty");
-        racer_tooltip()
+        Vec::default()
     };
-
+    debug!("tooltip: contents.len: {}", contents.len());
     Ok(contents)
 }
 
@@ -1011,7 +1100,7 @@ pub mod test {
         /// load directories do not exist nor could be created.
         pub fn run_tests(
             &self,
-            tests: &Vec<Test>,
+            tests: &[Test],
             load_dir: PathBuf,
             save_dir: PathBuf,
         ) -> Result<Vec<TestFailure>, String> {
@@ -1046,7 +1135,7 @@ pub mod test {
                         Ok(expect_result) => {
                             if actual_result.test != expect_result.test {
                                 let e = format!("Mismatched test: {:?}", expect_result.test);
-                                Some((Err(e.into()), actual_result))
+                                Some((Err(e), actual_result))
                             } else if actual_result == expect_result {
                                 None
                             } else {
@@ -1075,7 +1164,7 @@ pub mod test {
                         let save_file = actual_result.test.path(&save_dir);
                         TestFailure {
                             test: actual_result.test,
-                            expect_data: Err(e.into()),
+                            expect_data: Err(e),
                             expect_file: load_file,
                             actual_data: Ok(actual_result.data),
                             actual_file: save_file,
@@ -1211,6 +1300,12 @@ pub mod test {
                 let indent = 1;
             }
             ```
+
+            ## Module attributes are preserved
+
+            ```
+            #![allow(dead_code, unused_imports)]
+            ```
         ");
 
         let expected = noindent("
@@ -1264,6 +1359,12 @@ pub mod test {
                 // inner comment
                 let indent = 1;
             }
+            ```
+
+            ## Module attributes are preserved
+
+            ```rust
+            #![allow(dead_code, unused_imports)]
             ```
         ");
 
@@ -1623,6 +1724,30 @@ pub mod test {
     }
 
     #[test]
+    fn test_extract_docs_module_docs_with_attribute() {
+        let vfs = Vfs::new();
+        let file = Path::new("test_data/hover/src/test_extract_docs_module_docs_with_attribute.rs");
+        let row_start = Row::new_zero_indexed(0);
+        let actual = extract_docs(&vfs, &file, row_start)
+            .expect(&format!("failed to extract docs: {:?}", file))
+            .join("\n");
+
+        let expected = noindent(
+            "
+            Begin module docs
+
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas
+            tincidunt tristique maximus. Sed venenatis urna vel sagittis tempus.
+            In hac habitasse platea dictumst.
+
+            End module docs.
+        ",
+        );
+
+        assert_eq!(expected, actual, "module docs without a copyright header");
+    }
+
+    #[test]
     fn test_extract_docs_module_docs_no_copyright() {
         let vfs = Vfs::new();
         let file = Path::new("test_data/hover/src/test_extract_docs_module_docs_no_copyright.rs");
@@ -1821,12 +1946,22 @@ pub mod test {
             Test::new("test_tooltip_01.rs", 86, 10),
             Test::new("test_tooltip_01.rs", 87, 20),
             Test::new("test_tooltip_01.rs", 88, 18),
+            Test::new("test_tooltip_01.rs", 93, 11),
+            Test::new("test_tooltip_01.rs", 93, 18),
             Test::new("test_tooltip_01.rs", 95, 25),
+            Test::new("test_tooltip_01.rs", 109, 21),
+            Test::new("test_tooltip_01.rs", 113, 21),
             Test::new("test_tooltip_mod.rs", 22, 14),
             Test::new("test_tooltip_mod_use.rs", 11, 14),
             Test::new("test_tooltip_mod_use.rs", 12, 14),
             Test::new("test_tooltip_mod_use.rs", 12, 25),
             Test::new("test_tooltip_mod_use.rs", 13, 28),
+            Test::new("test_tooltip_mod_use_external.rs", 11, 7),
+            Test::new("test_tooltip_mod_use_external.rs", 11, 7),
+            Test::new("test_tooltip_mod_use_external.rs", 12, 7),
+            Test::new("test_tooltip_mod_use_external.rs", 12, 12),
+            Test::new("test_tooltip_mod_use_external.rs", 14, 12),
+            Test::new("test_tooltip_mod_use_external.rs", 15, 12),
             Test::new("test_tooltip_std.rs", 18, 15),
             Test::new("test_tooltip_std.rs", 18, 27),
             Test::new("test_tooltip_std.rs", 19, 7),

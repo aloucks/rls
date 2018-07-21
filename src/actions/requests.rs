@@ -821,7 +821,7 @@ pub(crate) fn racer_coord(
     }
 }
 
-fn from_racer_coord(
+pub(crate) fn from_racer_coord(
     coord: racer::Coordinate,
 ) -> (span::Row<span::OneIndexed>, span::Column<span::ZeroIndexed>) {
     (

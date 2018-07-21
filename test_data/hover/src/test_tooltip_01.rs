@@ -89,8 +89,26 @@ fn foo() {
 }
 
 trait Baz {
-    /// Foo copy type
-    type Foo: Copy;
+    /// Foo other type
+    type Foo: Other;
 
     fn foo() -> Self::Foo;
+
+}
+
+/// The other trait
+trait Other {}
+
+/// The constant FOO
+const FOO: &'static str = "FOO";
+
+/// The static BAR
+static BAR: u32 = 123;
+
+pub fn print_foo() {
+    println!("{}", FOO);
+}
+
+pub fn print_bar() {
+    println!("{}", BAR);
 }
