@@ -600,7 +600,7 @@ fn racer_match_to_def(ctx: &InitActionContext, m: &racer::Match) -> Option<Def> 
         StructField => DefKind::Field,
         Enum => DefKind::Enum,
         EnumVariant(_) => DefKind::StructVariant,
-        Type => DefKind::Type,
+        Type | TypeParameter(_) => DefKind::Type,
         FnArg => DefKind::Local,
         Trait => DefKind::Trait,
         Const => DefKind::Const,
