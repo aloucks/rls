@@ -196,11 +196,6 @@ impl ExpectedMessage {
     }
 }
 
-crate fn clear_messages(server: &mut ls_server::LsService<RecordOutput>, results: LsResultList) {
-    server.wait_for_concurrent_jobs();
-    results.lock().unwrap().clear();
-}
-
 crate fn expect_messages(server: &mut ls_server::LsService<RecordOutput>, results: LsResultList, expected: &[&ExpectedMessage]) {
     server.wait_for_concurrent_jobs();
 
@@ -241,6 +236,17 @@ crate fn expect_messages(server: &mut ls_server::LsService<RecordOutput>, result
     }
 
     *results = vec![];
+}
+
+crate fn compare_json(actual: &serde_json::Value, expected: &str) {
+    let expected: serde_json::Value = serde_json::from_str(expected).unwrap();
+    if actual != &expected {
+        panic!(
+            "JSON differs\nExpected:\n{}\nActual:\n{}\n",
+            serde_json::to_string_pretty(&expected).unwrap(),
+            serde_json::to_string_pretty(actual).unwrap(),
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
