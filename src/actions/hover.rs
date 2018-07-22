@@ -16,7 +16,7 @@ use crate::server::ResponseError;
 
 use racer;
 use rls_analysis::{Def, DefKind};
-use rls_span::{Column, Row, Span, ZeroIndexed};
+use rls_span::{Column, Row, Span, OneIndexed, ZeroIndexed};
 use rls_vfs::{self as vfs, Vfs};
 use rustfmt_nightly::{self as rustfmt, Input as FmtInput};
 
@@ -642,9 +642,18 @@ fn racer_match_to_def(ctx: &InitActionContext, m: &racer::Match) -> Option<Def> 
     let matchstr_len = matchstr.len() as u32;
     let docs = m.docs.trim().to_string();
     m.coords.map(|coords| {
+        // racer v2.1.0 seems to have a bug where it's populating the row
+        // number with `0` for modules (even though the type is Row<OneIndexed>)
+        let racer_row: Row<OneIndexed> = coords.row;
+        let neg_offset = if racer_row.0 == 0 {
+            warn!("racer_match_to_def: racer returned a '0' for a 1-based row: {:?}", m);
+            0
+        } else {
+            1
+        };
         let (row, col1) = requests::from_racer_coord(coords);
         let col2 = Column::new_zero_indexed(col1.0 + matchstr_len);
-        let row = Row::new_zero_indexed(row.0 - 1);
+        let row = Row::new_zero_indexed(row.0 - neg_offset);
         let span = Span::new(row, row, col1, col2, filepath);
         let def = Def {
             kind,
