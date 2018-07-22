@@ -663,10 +663,8 @@ fn racer_match_to_def(ctx: &InitActionContext, m: &racer::Match) -> Option<Def> 
     })
 }
 
-/// Extracts the documentation and type information using racer.
-///
-/// The type will be formatted according to the racer match and
-/// the documentation will be processed.
+/// Use racer to synthesize a `Def` for the given `span`. If no appropriate
+/// match is found with coordinates, `None` is returned.
 fn racer_def(ctx: &InitActionContext, span: &Span<ZeroIndexed>) -> Option<Def> {
     let vfs = ctx.vfs.clone();
     let file_path = &span.file;
