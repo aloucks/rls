@@ -1,3 +1,13 @@
+// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 use crate::actions::requests;
 use crate::actions::InitActionContext;
 use crate::config::FmtConfig;
@@ -15,7 +25,7 @@ use std::path::{Path, PathBuf};
 /// Cleanup documentation code blocks. The `docs` are expected to have
 /// the preceeding `///` or `//!` prefixes already trimmed away. Rust code
 /// blocks will ignore lines beginning with `#`. Code block annotations
-/// that are common to Rust will be converted to `to allow for markdown
+/// that are common to Rust will be converted to `rust` allow for markdown
 /// syntax coloring.
 pub fn process_docs(docs: &str) -> String {
     trace!("process_docs");
