@@ -1247,7 +1247,7 @@ pub mod test {
                     .chars()
                     .scan(0, |_, ch| if ch.is_whitespace() { Some(1) } else { None })
                     .fuse()
-                    .fold(0, |a, b| a + b)
+                    .sum()
             })
             .unwrap_or(0);
 
