@@ -16,7 +16,7 @@ use crate::server::ResponseError;
 
 use racer;
 use rls_analysis::{Def, DefKind};
-use rls_span::{Column, Row, Span, OneIndexed, ZeroIndexed};
+use rls_span::{Column, Row, Span, ZeroIndexed};
 use rls_vfs::{self as vfs, Vfs};
 use rustfmt_nightly::{self as rustfmt, Input as FmtInput};
 
@@ -642,18 +642,10 @@ fn racer_match_to_def(ctx: &InitActionContext, m: &racer::Match) -> Option<Def> 
     let matchstr_len = matchstr.len() as u32;
     let docs = m.docs.trim().to_string();
     m.coords.map(|coords| {
-        // racer v2.1.0 seems to have a bug where it's populating the row
-        // number with `0` for modules (even though the type is Row<OneIndexed>)
-        let racer_row: Row<OneIndexed> = coords.row;
-        let neg_offset = if racer_row.0 == 0 {
-            warn!("racer_match_to_def: racer returned a '0' for a 1-based row: {:?}", m);
-            0
-        } else {
-            1
-        };
+        assert!(coords.row.0 > 0, "racer_match_to_def: racer returned `0` for a 1-based row: {:?}", m);
         let (row, col1) = requests::from_racer_coord(coords);
         let col2 = Column::new_zero_indexed(col1.0 + matchstr_len);
-        let row = Row::new_zero_indexed(row.0 - neg_offset);
+        let row = Row::new_zero_indexed(row.0 - 1);
         let span = Span::new(row, row, col1, col2, filepath);
         let def = Def {
             kind,
@@ -715,19 +707,12 @@ fn racer_def(ctx: &InitActionContext, span: &Span<ZeroIndexed>) -> Option<Def> {
             file_path,
             location
         );
-        let matches = racer::complete_from_file(file_path, location, &session);
-        matches
-            .inspect(|m| {
-                trace!("racer_def: match: {:?}", m);
-            })
-            // Remove any matches that don't match the span
-            .filter(|m| name.as_ref().map(|name| name == &m.matchstr).unwrap_or(false))
+        let racer_match = racer::find_definition(file_path, location, &session);
+        trace!("racer_def: match: {:?}", racer_match);
+        racer_match
             // Avoid creating tooltip text that is exactly the item being hovered over
             .filter(|m| name.as_ref().map(|name| name != &m.contextstr).unwrap_or(true))
-            // The coords are required for the Def
-            .filter(|m| m.coords.is_some())
-            .flat_map(|m| racer_match_to_def(ctx, &m))
-            .next()
+            .and_then(|m| racer_match_to_def(ctx, &m))
     });
 
     let results = results.map_err(|_| {
@@ -876,14 +861,14 @@ pub fn tooltip(
     trace!("tooltip: span_def: {:?}", hover_span_def);
 
     let racer_fallback_enabled = ctx.config.lock().unwrap().racer_completion;
-    debug!(
-        "tooltip: racer_fallback_enabled: {}",
-        racer_fallback_enabled
-    );
-
+    
     // Fallback to racer if the def was not available and
     // racer is enabled.
     let hover_span_def = hover_span_def.or_else(|e| {
+        debug!(
+            "tooltip: racer_fallback_enabled: {}",
+            racer_fallback_enabled
+        );
         if racer_fallback_enabled {
             debug!("tooltip: span_def is empty, attempting with racer");
             racer_def(&ctx, &hover_span).ok_or_else(|| {
