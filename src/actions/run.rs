@@ -3,6 +3,9 @@ use ordslice::Ext;
 use regex::Regex;
 use rls_span::{Column, Position, Range, Row, ZeroIndexed};
 use rls_vfs::FileContents;
+use lazy_static::lazy_static;
+use log::{log, error};
+use serde_derive::Serialize;
 
 use std::{collections::HashMap, iter, path::Path};
 

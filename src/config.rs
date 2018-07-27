@@ -25,6 +25,9 @@ use cargo::core::{Shell, Workspace};
 
 use serde;
 use serde::de::{Deserialize, Deserializer, Visitor};
+use serde_derive::{Serialize, Deserialize};
+
+use log::{log, trace};
 
 use rustfmt_nightly::Config as RustfmtConfig;
 use rustfmt_nightly::{load_config, CliOptions, EmitMode, Verbosity};
@@ -310,7 +313,7 @@ where
         T: Deserialize<'de> + FromStr<Err = ()>,
     {
         type Value = T;
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
             formatter.write_str("`on`, `opt-in` or `off`")
         }
         fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<T, E> {

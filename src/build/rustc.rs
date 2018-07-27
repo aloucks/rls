@@ -22,6 +22,7 @@ use syntax::ast;
 use syntax::codemap::{FileLoader, RealFileLoader};
 use rls_data::Analysis;
 use rls_vfs::Vfs;
+use log::{log, trace};
 
 use crate::config::{ClippyPreference, Config};
 use crate::build::{BufWriter, BuildResult};
@@ -137,7 +138,7 @@ impl RlsRustcCalls {
 }
 
 #[cfg(feature = "clippy")]
-fn clippy_after_parse_callback(state: &mut ::rustc_driver::driver::CompileState) {
+fn clippy_after_parse_callback(state: &mut ::rustc_driver::driver::CompileState<'_, '_>) {
     use rustc_plugin::registry::Registry;
 
     let mut registry = Registry::new(

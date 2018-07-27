@@ -28,6 +28,7 @@ use crate::lsp_data::PublishDiagnosticsParams;
 use crate::concurrency::JobToken;
 use languageserver_types::DiagnosticSeverity;
 use itertools::Itertools;
+use log::{log, trace};
 
 use rls_analysis::AnalysisHost;
 use rls_data::Analysis;
@@ -47,8 +48,7 @@ pub struct PostBuildHandler {
     pub active_build_count: Arc<AtomicUsize>,
     pub notifier: Box<dyn DiagnosticsNotifier>,
     pub blocked_threads: Vec<thread::Thread>,
-    #[allow(unused)] // for drop
-    pub token: JobToken,
+    pub _token: JobToken,
 }
 
 impl PostBuildHandler {
@@ -138,7 +138,7 @@ impl PostBuildHandler {
         }
     }
 
-    fn finalise(mut self) {
+    fn finalize(mut self) {
         // the end message must be dispatched before waking up
         // the blocked threads, or we might see "done":true message
         // first in the next action invocation.
@@ -213,7 +213,7 @@ impl AnalysisQueue {
                 queue.drain_filter(|j| match *j {
                     QueuedJob::Job(ref j) if j.hash == Some(hash) => true,
                     _ => false,
-                }).for_each(|j| j.unwrap_job().handler.finalise())
+                }).for_each(|j| j.unwrap_job().handler.finalize())
             }
             trace!("Post-prune queue len: {}", queue.len());
 
@@ -307,6 +307,6 @@ impl Job {
                 .reload_analysis_from_memory(&self.cwd, self.analysis);
         }
 
-        self.handler.finalise();
+        self.handler.finalize();
     }
 }

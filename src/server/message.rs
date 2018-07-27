@@ -16,6 +16,8 @@ use serde;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use serde::Deserialize;
 use serde_json;
+use serde_derive::Serialize;
+use log::{debug, log};
 
 use crate::actions::ActionContext;
 use crate::lsp_data::{LSPNotification, LSPRequest};
@@ -95,7 +97,7 @@ pub enum RequestId {
 }
 
 impl fmt::Display for RequestId {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RequestId::Str(ref s) => write!(f, "\"{}\"", s),
             RequestId::Num(n) => write!(f, "{}", n),
@@ -225,7 +227,7 @@ where
     A: LSPRequest,
     <A as LSPRequest>::Params: serde::Serialize,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let raw: RawMessage = self.into();
         match serde_json::to_string(&raw) {
             Ok(val) => val.fmt(f),
@@ -239,7 +241,7 @@ where
     A: LSPNotification,
     <A as LSPNotification>::Params: serde::Serialize,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let raw: RawMessage = self.into();
         match serde_json::to_string(&raw) {
             Ok(val) => val.fmt(f),
@@ -367,6 +369,7 @@ mod test {
     use super::*;
     use languageserver_types::InitializedParams;
     use crate::server::notifications;
+    use serde_json::{json, json_internal};
 
     #[test]
     fn test_parse_as_notification() {

@@ -20,6 +20,7 @@ use rls_span as span;
 use racer;
 use rls_vfs::FileContents;
 use languageserver_types as ls_types;
+use serde_derive::{Serialize, Deserialize};
 
 use crate::actions::hover;
 
@@ -49,7 +50,7 @@ impl fmt::Display for UrlFileParseError
 where
     UrlFileParseError: Error,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.description())
     }
 }

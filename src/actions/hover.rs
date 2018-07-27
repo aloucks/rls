@@ -18,9 +18,10 @@ use racer;
 use rls_analysis::{Def, DefKind};
 use rls_span::{Column, Row, Span, ZeroIndexed};
 use rls_vfs::{self as vfs, Vfs};
-use rustfmt_nightly::{self as rustfmt, Input as FmtInput};
+use rustfmt_nightly::{Session as FmtSession, Input as FmtInput, NewlineStyle};
 
 use std::path::{Path, PathBuf};
+use log::*;
 
 /// Cleanup documentation code blocks. The `docs` are expected to have
 /// the preceeding `///` or `//!` prefixes already trimmed away. Rust code
@@ -726,7 +727,8 @@ fn racer_def(ctx: &InitActionContext, span: &Span<ZeroIndexed>) -> Option<Def> {
 /// in the event of an error.
 fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
     debug!("format_object: {}", the_type);
-    let config = fmt_config.get_rustfmt_config();
+    let mut config = fmt_config.get_rustfmt_config().clone();
+    config.set().newline_style(NewlineStyle::Unix);
     let trimmed = the_type.trim();
 
     // Normalize the ending for rustfmt
@@ -743,9 +745,13 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
 
     let mut out = Vec::<u8>::with_capacity(the_type.len());
     let input = FmtInput::Text(object.clone());
-    let formatted = match rustfmt::format_input(input, &config, Some(&mut out)) {
+    let mut session = FmtSession::new(config, Some(&mut out));
+    let formatted = match session.format(input) {
         Ok(_) => {
-            let utf8 = String::from_utf8(out);
+            let utf8 = session.out
+                .as_ref()
+                .map(|out| String::from_utf8(out.to_vec()))
+                .unwrap_or_else(|| Ok(trimmed.to_string()));
             match utf8.map(|lines| (lines.rfind('{'), lines)) {
                 Ok((Some(pos), lines)) => lines[0..pos].into(),
                 Ok((None, lines)) => lines,
@@ -799,13 +805,19 @@ fn format_object(fmt_config: &FmtConfig, the_type: String) -> String {
 fn format_method(fmt_config: &FmtConfig, the_type: String) -> String {
     trace!("format_method: {}", the_type);
     let the_type = the_type.trim().trim_right_matches(';').to_string();
-    let config = fmt_config.get_rustfmt_config();
+    let mut config = fmt_config.get_rustfmt_config().clone();
+    config.set().newline_style(NewlineStyle::Unix);
+    let tab_spaces = config.tab_spaces();
     let method = format!("impl Dummy {{ {} {{ unimplmented!() }} }}", the_type);
     let mut out = Vec::<u8>::with_capacity(the_type.len());
     let input = FmtInput::Text(method.clone());
-    let result = match rustfmt::format_input(input, config, Some(&mut out)) {
+    let mut session = FmtSession::new(config, Some(&mut out));
+    let result = match session.format(input) {
         Ok(_) => {
-            if let Ok(mut lines) = String::from_utf8(out) {
+            let lines = session.out
+                .as_ref()
+                .map(|out| String::from_utf8(out.to_vec()));
+            if let Some(Ok(mut lines)) = lines {
                 if let Some(front_pos) = lines.find('{') {
                     lines = lines[front_pos..].chars().skip(1).collect();
                 }
@@ -816,7 +828,7 @@ fn format_method(fmt_config: &FmtConfig, the_type: String) -> String {
                     .lines()
                     .filter(|line| line.trim() != "")
                     .map(|line| {
-                        let mut spaces = config.tab_spaces() + 1;
+                        let mut spaces = tab_spaces + 1;
                         let should_trim = |c: char| {
                             spaces = spaces.saturating_sub(1);
                             spaces > 0 && c.is_whitespace()
@@ -861,7 +873,7 @@ pub fn tooltip(
     trace!("tooltip: span_def: {:?}", hover_span_def);
 
     let racer_fallback_enabled = ctx.config.lock().unwrap().racer_completion;
-    
+
     // Fallback to racer if the def was not available and
     // racer is enabled.
     let hover_span_def = hover_span_def.or_else(|e| {
@@ -940,6 +952,7 @@ pub mod test {
     use crate::lsp_data::{Position, TextDocumentIdentifier, TextDocumentPositionParams};
     use crate::server::{Output, RequestId};
     use rls_analysis as analysis;
+    use serde_derive::{Serialize, Deserialize};
     use serde_json as json;
     use url::Url;
 
