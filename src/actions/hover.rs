@@ -98,6 +98,7 @@ pub fn extract_docs(
     };
     let mut in_meta = false;
     let mut hit_top = false;
+    let mut line_reads_remaining: u32 = 5000;
     loop {
         let line = vfs.load_line(file, row)?;
 
@@ -111,6 +112,18 @@ pub fn extract_docs(
             hit_top = true;
         } else {
             row = next_row;
+        }
+
+        line_reads_remaining = line_reads_remaining.saturating_sub(1);
+        if line_reads_remaining == 0 {
+            error!(
+                "extract_docs: maximum line reads exceeded: row_start = {:?}, row: {:?}, hit_top: {:?}, up: {:?}, file = {:?}", 
+                row_start,
+                row,
+                hit_top,
+                up,
+                file);
+            break;
         }
 
         let line = line.trim();
